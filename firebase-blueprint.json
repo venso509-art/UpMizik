@@ -1,0 +1,103 @@
+{
+  "entities": {
+    "Music": {
+      "title": "Music",
+      "description": "Chante ak moso mizik difize sou platfòm nan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "artistId": { "type": "string" },
+        "artistName": { "type": "string" },
+        "category": { "type": "string" },
+        "coverUrl": { "type": "string" },
+        "audioUrl": { "type": "string" },
+        "duration": { "type": "number" },
+        "listens": { "type": "number" },
+        "totalDonations": { "type": "number" },
+        "releaseFormat": { "type": "string", "enum": ["single", "album", "ep", "mixtape", "demo"] },
+        "albumName": { "type": "string" },
+        "trackNumber": { "type": "number" },
+        "credits": { "type": "array" },
+        "status": { "type": "string", "enum": ["active", "pending", "rejected"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "title", "artistId", "artistName", "audioUrl"]
+    },
+    "Artist": {
+      "title": "Artist",
+      "description": "Kont atis verifye ak enfòmasyon pwofil",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "stageName": { "type": "string" },
+        "realName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "city": { "type": "string" },
+        "pin": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "bio": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "active", "rejected", "suspended"] },
+        "totalListens": { "type": "number" },
+        "totalDonationsReceived": { "type": "number" },
+        "registrationDate": { "type": "string" }
+      },
+      "required": ["id", "stageName", "email", "phone", "pin"]
+    },
+    "Donation": {
+      "title": "Donation",
+      "description": "Sipò ak donasyon fanatik voye pou atis yo pa MonCash/Natcash",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "musicId": { "type": "string" },
+        "musicTitle": { "type": "string" },
+        "artistId": { "type": "string" },
+        "artistName": { "type": "string" },
+        "donorName": { "type": "string" },
+        "donorPhone": { "type": "string" },
+        "paymentMethod": { "type": "string", "enum": ["MonCash", "Natcash", "Lòt"] },
+        "amount": { "type": "number" },
+        "referenceNumber": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "validated", "rejected"] },
+        "artistShare": { "type": "number" },
+        "platformShare": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "musicId", "artistId", "donorName", "amount", "status"]
+    },
+    "SocialPost": {
+      "title": "SocialPost",
+      "description": "Piblikasyon sou fil rezo sosyal UpMizik",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "artistId": { "type": "string" },
+        "stageName": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "likes": { "type": "number" }
+      },
+      "required": ["id", "artistId", "stageName", "content"]
+    }
+  },
+  "firestore": {
+    "/music/{musicId}": {
+      "schema": { "$ref": "#/entities/Music" },
+      "description": "Koleksyon tout mizik"
+    },
+    "/artists/{artistId}": {
+      "schema": { "$ref": "#/entities/Artist" },
+      "description": "Koleksyon tout atis"
+    },
+    "/donations/{donationId}": {
+      "schema": { "$ref": "#/entities/Donation" },
+      "description": "Koleksyon tout donasyon ak sipò"
+    },
+    "/social_posts/{postId}": {
+      "schema": { "$ref": "#/entities/SocialPost" },
+      "description": "Koleksyon tout piblikasyon sosyal"
+    }
+  }
+}

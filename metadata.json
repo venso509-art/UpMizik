@@ -1,0 +1,7 @@
+{
+  "name": "UpMizik",
+  "description": "Platfòm mizik ayisyen pou difizyon ak sipò dirèk pou jèn atis yo.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

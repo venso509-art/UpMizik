@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient Ring -->
+    <linearGradient id="ringGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0b3b95" />
+      <stop offset="35%" stop-color="#144fb8" />
+      <stop offset="70%" stop-color="#cf1b29" />
+      <stop offset="100%" stop-color="#e61e2a" />
+    </linearGradient>
+
+    <!-- Up Arrow Gradient -->
+    <linearGradient id="arrowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff3b30" />
+      <stop offset="50%" stop-color="#e61928" />
+      <stop offset="100%" stop-color="#990b16" />
+    </linearGradient>
+    <linearGradient id="arrowFacet" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ff453a" />
+      <stop offset="100%" stop-color="#c4101e" />
+    </linearGradient>
+
+    <!-- U Letter Gradient -->
+    <linearGradient id="uGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0c3882" />
+      <stop offset="50%" stop-color="#0a2e6f" />
+      <stop offset="100%" stop-color="#04153b" />
+    </linearGradient>
+
+    <!-- Mizik Text Gradient -->
+    <linearGradient id="mizikGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0d3170" />
+      <stop offset="25%" stop-color="#1a2f6c" />
+      <stop offset="55%" stop-color="#96152a" />
+      <stop offset="85%" stop-color="#d61c28" />
+      <stop offset="100%" stop-color="#f02432" />
+    </linearGradient>
+
+    <!-- Play Button Inner Gradient -->
+    <linearGradient id="playGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#143c82" />
+      <stop offset="60%" stop-color="#401538" />
+      <stop offset="100%" stop-color="#ba1624" />
+    </linearGradient>
+
+    <!-- Drop Shadow -->
+    <filter id="subtleShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- Circular Outer Gradient Ring -->
+  <circle cx="250" cy="250" r="236" fill="none" stroke="url(#ringGrad)" stroke-width="11" />
+
+  <!-- Left Audio Sound Wave Bars -->
+  <g fill="#94a3b8" opacity="0.6">
+    <rect x="42" y="240" width="4" height="20" rx="2" />
+    <rect x="50" y="230" width="4" height="40" rx="2" />
+    <rect x="58" y="222" width="4" height="56" rx="2" />
+    <rect x="66" y="232" width="4" height="36" rx="2" />
+    <rect x="74" y="242" width="4" height="16" rx="2" />
+  </g>
+
+  <!-- Top-Right Broadcast Waves -->
+  <g stroke="#94a3b8" stroke-width="3.5" fill="none" stroke-linecap="round" opacity="0.65">
+    <path d="M 194 172 A 18 18 0 0 1 206 150" />
+    <path d="M 202 176 A 28 28 0 0 1 216 142" />
+  </g>
+
+  <!-- Bottom-Right Broadcast Waves -->
+  <g stroke="#94a3b8" stroke-width="3.5" fill="none" stroke-linecap="round" opacity="0.65">
+    <path d="M 432 328 A 20 20 0 0 1 444 346" />
+    <path d="M 438 320 A 32 32 0 0 1 454 352" />
+  </g>
+
+  <!-- Main Center Logo Group -->
+  <g filter="url(#subtleShadow)">
+    <!-- Stylized 'U' with Play Button & 3D Red Up Arrow -->
+    <g transform="translate(75, 125)">
+      <!-- 'U' Shape Outer -->
+      <path d="M 15 70 L 15 110 C 15 160 40 180 85 180 C 120 180 145 160 148 115 L 148 70 L 122 70 L 122 110 C 120 145 105 156 85 156 C 62 156 42 145 42 110 L 42 70 Z" 
+            fill="url(#uGrad)" />
+
+      <!-- Inner 3D Red Arrow Ascending -->
+      <g>
+        <!-- Arrow Base Stem -->
+        <path d="M 68 60 L 68 135 L 94 135 L 94 60 Z" fill="url(#arrowGrad)" />
+        <!-- Arrow Left Facet (Lighter) -->
+        <path d="M 81 5 L 44 64 L 81 64 Z" fill="url(#arrowFacet)" />
+        <!-- Arrow Right Facet (Darker) -->
+        <path d="M 81 5 L 118 64 L 81 64 Z" fill="#b30f1b" />
+      </g>
+
+      <!-- Play Button in 'U' Bowl -->
+      <g transform="translate(32, 70)">
+        <polygon points="12,10 46,30 12,50" fill="url(#playGrad)" stroke="#ffffff" stroke-width="4.5" stroke-linejoin="round" />
+        <polygon points="17,17 40,30 17,43" fill="#ffffff" opacity="0.25" />
+      </g>
+    </g>
+
+    <!-- 'p' + 'Mizik' Typography Group -->
+    <g transform="translate(175, 205)">
+      <!-- Letter 'p' in Deep Navy -->
+      <path d="M 2 7 L 26 7 L 26 24 C 33 10 46 4 60 4 C 82 4 98 20 98 48 C 98 76 81 92 59 92 C 45 92 33 85 26 72 L 26 112 L 2 112 Z M 26 48 C 26 63 36 73 50 73 C 64 73 74 63 74 48 C 74 33 64 23 50 23 C 36 23 26 33 26 48 Z" 
+            fill="#0c2d66" />
+
+      <!-- Text 'Mizik' in Bold Gradient Sans -->
+      <g transform="translate(86, 0)">
+        <!-- 'M' -->
+        <path d="M 6 88 L 6 6 L 30 6 L 46 54 L 62 6 L 86 6 L 86 88 L 65 88 L 65 34 L 52 74 L 40 74 L 27 34 L 27 88 Z" fill="url(#mizikGrad)" />
+        <!-- 'i' -->
+        <rect x="94" y="6" width="19" height="19" rx="3" fill="#9e1629" />
+        <rect x="94" y="32" width="19" height="56" rx="2" fill="#ba1628" />
+        <!-- 'z' -->
+        <path d="M 122 32 L 160 32 L 160 48 L 138 72 L 162 72 L 162 88 L 120 88 L 120 73 L 143 48 L 122 48 Z" fill="#cf1929" />
+        <!-- 'i' -->
+        <rect x="171" y="6" width="19" height="19" rx="3" fill="#e01b2a" />
+        <rect x="171" y="32" width="19" height="56" rx="2" fill="#e81e2b" />
+        <!-- 'k' -->
+        <path d="M 199 6 L 219 6 L 219 46 L 243 32 L 268 32 L 241 57 L 270 88 L 244 88 L 226 68 L 219 75 L 219 88 L 199 88 Z" fill="url(#mizikGrad)" />
+      </g>
+    </g>
+
+    <!-- Underline Dual Stripes -->
+    <g transform="translate(75, 324)">
+      <!-- Red Double Line on Left -->
+      <rect x="0" y="0" width="90" height="4.5" rx="2" fill="#e01c29" />
+      <rect x="0" y="8" width="90" height="4.5" rx="2" fill="#e01c29" />
+
+      <!-- Blue Double Line on Right -->
+      <rect x="120" y="0" width="225" height="4.5" rx="2" fill="#0d409c" />
+      <rect x="120" y="8" width="225" height="4.5" rx="2" fill="#0d409c" />
+    </g>
+
+    <!-- Tagline: "Platfòm mizik 100% ayisyen" -->
+    <text x="250" y="368" 
+          text-anchor="middle" 
+          font-family="'Cabinet Grotesk', 'Plus Jakarta Sans', -apple-system, sans-serif" 
+          font-weight="700" 
+          font-size="23.5" 
+          fill="#1e293b" 
+          letter-spacing="-0.3">
+      Platfòm mizik 100% ayisyen
+    </text>
+  </g>
+</svg>

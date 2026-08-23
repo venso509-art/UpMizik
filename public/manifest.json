@@ -1,0 +1,18 @@
+{
+  "name": "UpMizik - Difizyon Mizik Ayiti",
+  "short_name": "UpMizik",
+  "description": "Platfòm Difizyon Mizik Ayisyen ak Sipò Dirèk pou Jèn Atis yo.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#05070a",
+  "theme_color": "#05070a",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/upmizik-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
