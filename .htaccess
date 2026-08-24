@@ -1,0 +1,28 @@
+# ==========================================================
+# UpMizik - Hostinger Root .htaccess (SPA Routing & API)
+# ==========================================================
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Pa manyen dosye backend oswa dosye reyèl ki egziste sou sèvè a
+    RewriteCond %{REQUEST_URI} ^/backend/ [NC,OR]
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Tout lòt wout (routes) ale sou index.html pou React SPA
+    RewriteRule ^ index.html [L]
+</IfModule>
+
+# Pwoteksyon fichye .env ak konfigirasyon
+<FilesMatch "^\.env|composer\.(json|lock)|package(-lock)?\.json">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Pèmèt konpresyon GZIP pou sit la pi rapid
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
+</IfModule>

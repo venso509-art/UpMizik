@@ -1,0 +1,30 @@
+# ==========================================================
+# UpMizik - Hostinger Apache / LiteSpeed Configuration
+# ==========================================================
+
+# 1. Ogmante limit upload pou fichye mizik ak prèv yo
+php_value upload_max_filesize 128M
+php_value post_max_size 128M
+php_value memory_limit 256M
+php_value max_execution_time 300
+php_value max_input_time 300
+
+# 2. CORS Headers pou pèmèt frontend lan kominike ak backend lan san blokaj
+<IfModule mod_headers.c>
+    Header set Access-Control-Allow-Origin "*"
+    Header set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    Header set Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+</IfModule>
+
+# 3. Règleman sekirite ak ekzekisyon
+Options -Indexes
+
+# 4. MIME types pou odyo ak imaj yo kòrèk sou tout navigatè
+<IfModule mod_mime.c>
+    AddType audio/mpeg .mp3
+    AddType audio/wav .wav
+    AddType audio/aac .aac
+    AddType audio/mp4 .m4a
+    AddType audio/ogg .ogg
+    AddType image/webp .webp
+</IfModule>

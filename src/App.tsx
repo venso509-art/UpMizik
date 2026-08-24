@@ -249,6 +249,72 @@ export default function App() {
         // Firebase sync deferred silently in local / sandboxed mode
       }
     })();
+
+    // Real-time Firestore Subscriptions with onSnapshot across the app
+    const unsubArtists = FirebaseService.subscribeToArtists((cloudArtists) => {
+      if (cloudArtists && cloudArtists.length > 0) {
+        const currentLocal = StorageService.getArtists();
+        const cloudMap = new Map(cloudArtists.map(a => [a.id, a]));
+        const merged = [...cloudArtists];
+        for (const la of currentLocal) {
+          if (!cloudMap.has(la.id)) {
+            merged.push(la);
+            cloudMap.set(la.id, la);
+          }
+        }
+        setArtists(merged);
+        StorageService.saveArtists(merged);
+      }
+    });
+
+    const unsubDonations = FirebaseService.subscribeToDonations((cloudDonations) => {
+      if (cloudDonations && cloudDonations.length > 0) {
+        const activeAdmin = StorageService.getLoggedInAdmin();
+        if (activeAdmin && activeAdmin.role === 'super_admin') {
+          const currentLocal = StorageService.getDonations(activeAdmin);
+          const cloudMap = new Map(cloudDonations.map(d => [d.id, d]));
+          const merged = [...cloudDonations];
+          for (const ld of currentLocal) {
+            if (!cloudMap.has(ld.id)) {
+              merged.push(ld);
+              cloudMap.set(ld.id, ld);
+            }
+          }
+          setDonations(merged);
+          StorageService.saveDonations(merged);
+        }
+      }
+    });
+
+    const unsubMusic = FirebaseService.subscribeToMusic((cloudMusic) => {
+      if (cloudMusic && cloudMusic.length > 0) {
+        const currentLocal = StorageService.getMusic();
+        const cloudMap = new Map(cloudMusic.map(m => [m.id, m]));
+        const merged = [...cloudMusic];
+        for (const lm of currentLocal) {
+          if (!cloudMap.has(lm.id)) {
+            merged.push(lm);
+            cloudMap.set(lm.id, lm);
+          }
+        }
+        setMusicList(merged);
+        StorageService.saveMusic(merged);
+      }
+    });
+
+    const unsubPosts = FirebaseService.subscribeToSocialPosts((cloudPosts) => {
+      if (cloudPosts && cloudPosts.length > 0) {
+        setSocialPosts(cloudPosts);
+        StorageService.saveSocialPosts(cloudPosts);
+      }
+    });
+
+    return () => {
+      unsubArtists();
+      unsubDonations();
+      unsubMusic();
+      unsubPosts();
+    };
   }, []);
 
   // Cross-view and Storage Sync Listener for Music, Artists, and Donations updates
@@ -717,6 +783,12 @@ export default function App() {
   const handleValidateDonation = (donationId: string, accept: boolean) => {
     const adminName = currentAdmin?.name || 'Mr Clauvens';
     const result = StorageService.validateDonation(donationId, accept, adminName);
+    if (result.donation) {
+      FirebaseService.saveSingleDonation(result.donation);
+    }
+    if (result.generatedEmail) {
+      FirebaseService.saveInboxMessage(result.generatedEmail);
+    }
     setDonations(StorageService.getDonations(currentAdmin));
     setMusicList(StorageService.getMusic());
     setArtists(StorageService.getArtists());
@@ -740,11 +812,45 @@ export default function App() {
     if (result.generatedEmail) {
       FirebaseService.saveInboxMessage(result.generatedEmail);
     }
-    setArtists(StorageService.getArtists());
+
+    const newStatus = accept ? ('active' as const) : ('rejected' as const);
+    
+    // Explicitly update React artists state immediately
+    setArtists((prevArtists) => {
+      const exists = prevArtists.some(a => a.id === artistId);
+      if (exists) {
+        return prevArtists.map(a => {
+          if (a.id === artistId) {
+            return {
+              ...a,
+              ...(result.artist || {}),
+              status: newStatus,
+              registrationRejectionReason: !accept ? (reason || 'Foto prèv transfè a pa klè oswa referans lan pa koresponn. Tanpri telechaje yon nouvo prèv.') : undefined
+            };
+          }
+          return a;
+        });
+      } else if (result.artist) {
+        return [...prevArtists, result.artist];
+      }
+      return StorageService.getArtists();
+    });
 
     if (currentArtist && currentArtist.id === artistId && result.artist) {
       setCurrentArtist(result.artist);
     }
+
+    // Broadcast update across the whole app
+    window.dispatchEvent(
+      new CustomEvent('upmizik_artist_updated', {
+        detail: {
+          action: accept ? 'validate' : 'reject',
+          artistId,
+          status: newStatus,
+          artist: result.artist
+        }
+      })
+    );
 
     if (result.artist && result.generatedEmail) {
       if (accept) {

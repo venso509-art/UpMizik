@@ -28,6 +28,7 @@ import { ArtistUser, PaymentSettingsConfig } from '../types';
 import { HAITIAN_DEPARTMENTS_AND_CITIES, ALL_HAITIAN_CITIES } from '../data/haitianCities';
 import { compressAndReadFile } from '../utils/imageUtils';
 import { StorageService } from '../utils/storage';
+import { FirebaseService } from '../utils/firebase';
 import { validateRestrictedDigits, hasRestrictedPhoneOrDigits, RESTRICTED_DIGITS_ERROR_MESSAGE } from '../utils/textValidation';
 
 interface ArtistAuthModalProps {
@@ -266,6 +267,8 @@ export const ArtistAuthModal: React.FC<ArtistAuthModalProps> = ({
     };
 
     // Save immediately to storage and firestore so admin sees the pending registration right away
+    StorageService.saveArtist(newArtistObj);
+    FirebaseService.saveSingleArtist(newArtistObj);
     onRegisterArtist(newArtistObj);
     setTempArtist(newArtistObj);
     // Transition to Welcome Letter explaining 85% revenue rule
@@ -288,6 +291,8 @@ export const ArtistAuthModal: React.FC<ArtistAuthModalProps> = ({
           registrationProofUrl: proofPreview,
           status: 'pending'
         };
+        StorageService.saveArtist(finalArtist);
+        FirebaseService.saveSingleArtist(finalArtist);
         onRegisterArtist(finalArtist);
         setTempArtist(finalArtist);
         setStep('registered_pending_notice');
@@ -312,6 +317,8 @@ export const ArtistAuthModal: React.FC<ArtistAuthModalProps> = ({
           status: 'pending',
           registrationRejectionReason: undefined
         };
+        StorageService.saveArtist(updatedArtist);
+        FirebaseService.saveSingleArtist(updatedArtist);
         onRegisterArtist(updatedArtist);
         setTempArtist(updatedArtist);
         setStep('registered_pending_notice');

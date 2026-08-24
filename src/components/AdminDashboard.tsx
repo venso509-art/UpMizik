@@ -98,6 +98,7 @@ import { compressAndReadFile } from '../utils/imageUtils';
 import { IdbStorage } from '../utils/idbStorage';
 import { getAudioDuration } from '../utils/audioEngine';
 import { StorageService } from '../utils/storage';
+import { FirebaseService } from '../utils/firebase';
 import { SongCreditsEditor } from './SongCreditsEditor';
 import { SongCreditsModal } from './SongCreditsModal';
 import { MonthlyRevenueBarChart } from './MonthlyRevenueBarChart';
@@ -342,12 +343,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   // Artist Validation & Integration Demands State
+  const [optimisticArtistStatus, setOptimisticArtistStatus] = useState<Record<string, 'pending' | 'active' | 'rejected' | 'suspended'>>({});
+  const [optimisticDonationStatus, setOptimisticDonationStatus] = useState<Record<string, 'pending' | 'validated' | 'rejected'>>({});
   const [validationCategoryFilter, setValidationCategoryFilter] = useState<'all' | 'artists' | 'donations'>('all');
+  const [validationStatusFilter, setValidationStatusFilter] = useState<'pending' | 'validated' | 'rejected' | 'all'>('pending');
+  const [validationSearchQuery, setValidationSearchQuery] = useState<string>('');
   const [artistValidationFilter, setArtistValidationFilter] = useState<'pending' | 'all' | 'active' | 'rejected'>('pending');
   const [artistValidationSearch, setArtistValidationSearch] = useState<string>('');
   const [selectedArtistDossier, setSelectedArtistDossier] = useState<ArtistUser | null>(null);
   const [showAddManualArtistModal, setShowAddManualArtistModal] = useState<boolean>(false);
   const [copiedValidationFieldId, setCopiedValidationFieldId] = useState<string | null>(null);
+
+  // Instant optimistic handlers
+  const handleOptimisticValidateArtist = (artistId: string, accept: boolean, reason?: string) => {
+    const targetStatus = accept ? 'active' : 'rejected';
+    setOptimisticArtistStatus(prev => ({ ...prev, [artistId]: targetStatus }));
+    onValidateArtist(artistId, accept, reason);
+    setInternalRefreshKey(k => k + 1);
+  };
+
+  const handleOptimisticValidateDonation = (donationId: string, accept: boolean) => {
+    const targetStatus = accept ? 'validated' : 'rejected';
+    setOptimisticDonationStatus(prev => ({ ...prev, [donationId]: targetStatus }));
+    onValidateDonation(donationId, accept);
+    setInternalRefreshKey(k => k + 1);
+  };
 
   // Manual Artist Form State
   const [manualArtistStageName, setManualArtistStageName] = useState('');
@@ -434,6 +454,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }, 12000);
   }, [isLiveAudioEnabled]);
 
+  // Real-time Firestore Live Subscriptions using onSnapshot
+  const [realtimeFirestoreArtists, setRealtimeFirestoreArtists] = useState<ArtistUser[] | null>(null);
+  const [realtimeFirestoreDonations, setRealtimeFirestoreDonations] = useState<DonationItem[] | null>(null);
+
   // Initial population of existing donation IDs
   React.useEffect(() => {
     try {
@@ -443,7 +467,85 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     isInitialMountRef.current = false;
   }, [currentAdmin]);
 
+  // Real-time Firestore onSnapshot Subscriptions for Artists and Donations
   React.useEffect(() => {
+    // 1. Subscribe to 'artists' collection onSnapshot
+    const unsubscribeArtists = FirebaseService.subscribeToArtists((cloudArtists) => {
+      if (cloudArtists && cloudArtists.length > 0) {
+        setRealtimeFirestoreArtists(cloudArtists);
+        // Safely update local storage without overwriting validated/rejected status
+        try {
+          const currentLocal = StorageService.getArtists();
+          const localMap = new Map(currentLocal.map(a => [a.id, a]));
+          const cloudMap = new Map(cloudArtists.map(a => [a.id, a]));
+          
+          const merged = cloudArtists.map(ca => {
+            const la = localMap.get(ca.id);
+            if (la) {
+              // If local action marked as active/rejected/suspended while cloud is still pending, keep the local updated status
+              if (la.status && la.status !== 'pending' && ca.status === 'pending') {
+                return { ...ca, ...la, status: la.status };
+              }
+              return { ...ca, ...la };
+            }
+            return ca;
+          });
+
+          for (const la of currentLocal) {
+            if (!cloudMap.has(la.id)) {
+              merged.push(la);
+              cloudMap.set(la.id, la);
+            }
+          }
+          // Update cache silently without re-dispatching loop
+          localStorage.setItem('upmizik_artists', JSON.stringify(merged));
+        } catch {}
+        setInternalRefreshKey(k => k + 1);
+      }
+    });
+
+    // 2. Subscribe to 'donations' collection onSnapshot
+    const unsubscribeDonations = FirebaseService.subscribeToDonations((cloudDonations) => {
+      if (cloudDonations && cloudDonations.length > 0) {
+        setRealtimeFirestoreDonations(cloudDonations);
+        // Detect new pending donations to trigger live alert sound/toast in real-time
+        cloudDonations.forEach(don => {
+          if (!knownDonationIdsRef.current.has(don.id)) {
+            knownDonationIdsRef.current.add(don.id);
+            if (!isInitialMountRef.current && don.status === 'pending') {
+              triggerLiveDonationAlert(don);
+            }
+          }
+        });
+        // Safely update local storage without overwriting validated/rejected status
+        try {
+          const currentLocal = StorageService.getDonations(currentAdmin);
+          const localMap = new Map(currentLocal.map(d => [d.id, d]));
+          const cloudMap = new Map(cloudDonations.map(d => [d.id, d]));
+          
+          const merged = cloudDonations.map(cd => {
+            const ld = localMap.get(cd.id);
+            if (ld) {
+              if (ld.status && ld.status !== 'pending' && cd.status === 'pending') {
+                return { ...cd, ...ld, status: ld.status };
+              }
+              return { ...cd, ...ld };
+            }
+            return cd;
+          });
+
+          for (const ld of currentLocal) {
+            if (!cloudMap.has(ld.id)) {
+              merged.push(ld);
+              cloudMap.set(ld.id, ld);
+            }
+          }
+          localStorage.setItem('upmizik_donations', JSON.stringify(merged));
+        } catch {}
+        setInternalRefreshKey(k => k + 1);
+      }
+    });
+
     const handleDonationCustomSync = (event: Event) => {
       setInternalRefreshKey(k => k + 1);
       const customEv = event as CustomEvent<{ action?: string; donation?: DonationItem }>;
@@ -480,6 +582,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     window.addEventListener('storage', handleStorageOrCustomSync);
 
     return () => {
+      unsubscribeArtists();
+      unsubscribeDonations();
       window.removeEventListener('upmizik_artist_updated', handleStorageOrCustomSync);
       window.removeEventListener('upmizik_donation_updated', handleDonationCustomSync);
       window.removeEventListener('upmizik_music_updated', handleStorageOrCustomSync);
@@ -487,19 +591,99 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
   }, [currentAdmin, triggerLiveDonationAlert]);
 
-  // Effective donations: prefer stored list from StorageService if props is empty or after an update
+  // Effective donations: prefer real-time Firestore onSnapshot list, merged with stored list
   const effectiveDonations = useMemo(() => {
     const stored = StorageService.getDonations(currentAdmin);
-    if (stored && stored.length > 0) return stored;
-    return donations || [];
-  }, [donations, currentAdmin, internalRefreshKey]);
+    let baseList: DonationItem[] = [];
+    if (realtimeFirestoreDonations && realtimeFirestoreDonations.length > 0) {
+      const localMap = new Map(stored.map(d => [d.id, d]));
+      const cloudMap = new Map(realtimeFirestoreDonations.map(d => [d.id, d]));
+      
+      const merged = realtimeFirestoreDonations.map(cd => {
+        const ld = localMap.get(cd.id);
+        if (ld) {
+          // If local has active/validated or rejected status while cloud is still pending, trust local admin action
+          if (ld.status && ld.status !== 'pending' && cd.status === 'pending') {
+            return { ...cd, ...ld, status: ld.status };
+          }
+          return { ...cd, ...ld };
+        }
+        return cd;
+      });
 
-  // Effective artists: prefer stored list from StorageService if props is empty or after an update
+      for (const ld of stored) {
+        if (!cloudMap.has(ld.id)) {
+          merged.push(ld);
+          cloudMap.set(ld.id, ld);
+        }
+      }
+      baseList = merged;
+    } else if (stored && stored.length > 0) {
+      baseList = stored;
+    } else {
+      baseList = donations || [];
+    }
+
+    // Apply optimistic updates
+    return baseList.map(d => {
+      if (optimisticDonationStatus[d.id]) {
+        return { ...d, status: optimisticDonationStatus[d.id] };
+      }
+      return d;
+    });
+  }, [realtimeFirestoreDonations, donations, currentAdmin, internalRefreshKey, optimisticDonationStatus]);
+
+  // Effective artists: prefer real-time Firestore onSnapshot list, merged with stored list
   const effectiveArtists = useMemo(() => {
     const stored = StorageService.getArtists();
-    if (stored && stored.length > 0) return stored;
-    return artists || [];
-  }, [artists, internalRefreshKey]);
+    let baseList: ArtistUser[] = [];
+    if (realtimeFirestoreArtists && realtimeFirestoreArtists.length > 0) {
+      const localMap = new Map(stored.map(a => [a.id, a]));
+      const cloudMap = new Map(realtimeFirestoreArtists.map(a => [a.id, a]));
+      
+      const merged = realtimeFirestoreArtists.map(ca => {
+        const la = localMap.get(ca.id);
+        if (la) {
+          // If local has active or rejected status while cloud is still pending, trust local admin action
+          if (la.status && la.status !== 'pending' && ca.status === 'pending') {
+            return { ...ca, ...la, status: la.status };
+          }
+          return { ...ca, ...la };
+        }
+        return ca;
+      });
+
+      for (const la of stored) {
+        if (!cloudMap.has(la.id)) {
+          merged.push(la);
+          cloudMap.set(la.id, la);
+        }
+      }
+      baseList = merged;
+    } else if (stored && stored.length > 0) {
+      baseList = stored;
+    } else {
+      baseList = artists || [];
+    }
+
+    // Merge with incoming artists prop from App.tsx
+    const propMap = new Map<string, ArtistUser>((artists || []).map(a => [a.id, a]));
+
+    return baseList.map(a => {
+      let finalArt = { ...a };
+      const propArt = propMap.get(a.id);
+      if (propArt && propArt.status && propArt.status !== 'pending') {
+        finalArt.status = propArt.status;
+        if (propArt.registrationRejectionReason) {
+          finalArt.registrationRejectionReason = propArt.registrationRejectionReason;
+        }
+      }
+      if (optimisticArtistStatus[a.id]) {
+        finalArt.status = optimisticArtistStatus[a.id];
+      }
+      return finalArt;
+    });
+  }, [realtimeFirestoreArtists, artists, internalRefreshKey, optimisticArtistStatus]);
 
   // Comprehensive calculation of each artist's monthly revenue & payouts (-15% + $0.99 fee)
   const artistsEarningStats = useMemo(() => {
@@ -739,8 +923,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const pendingDonations = effectiveDonations.filter(d => d.status === 'pending');
   const validatedDonations = effectiveDonations.filter(d => d.status === 'validated');
+  const rejectedDonations = effectiveDonations.filter(d => d.status === 'rejected');
   const pendingArtists = effectiveArtists.filter(a => a.status === 'pending');
   const activeArtists = effectiveArtists.filter(a => a.status === 'active' || !a.status);
+  const rejectedArtists = effectiveArtists.filter(a => a.status === 'rejected');
 
   // Financial calculations in USD
   const totalGrossDonations = musicList.reduce((acc, m) => acc + (m.totalDonations || 0), 0);
@@ -2458,6 +2644,69 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* VIEW 2: VALIDATION DONATIONS & ARTIST SIGNUPS */}
       {activeTab === 'validations' && (() => {
         const totalPendingAll = pendingDonations.length + pendingArtists.length;
+        const totalValidatedAll = validatedDonations.length + activeArtists.length;
+        const totalRejectedAll = rejectedDonations.length + rejectedArtists.length;
+        const totalAllRecords = effectiveDonations.length + effectiveArtists.length;
+
+        // Filter pending lists
+        const filteredPendingArtists = pendingArtists.filter(art => {
+          if (!validationSearchQuery.trim()) return true;
+          const q = validationSearchQuery.toLowerCase().trim();
+          return (art.stageName || '').toLowerCase().includes(q) ||
+                 (art.name || '').toLowerCase().includes(q) ||
+                 (art.phone || '').toLowerCase().includes(q) ||
+                 (art.email || '').toLowerCase().includes(q);
+        });
+
+        const filteredPendingDonations = pendingDonations.filter(don => {
+          if (!validationSearchQuery.trim()) return true;
+          const q = validationSearchQuery.toLowerCase().trim();
+          return (don.donorName || '').toLowerCase().includes(q) ||
+                 (don.musicTitle || '').toLowerCase().includes(q) ||
+                 (don.artistName || '').toLowerCase().includes(q) ||
+                 (don.donorPhone || '').toLowerCase().includes(q) ||
+                 (don.id || '').toLowerCase().includes(q);
+        });
+
+        // Filter validated lists
+        const filteredValidatedDonations = validatedDonations.filter(don => {
+          if (!validationSearchQuery.trim()) return true;
+          const q = validationSearchQuery.toLowerCase().trim();
+          return (don.donorName || '').toLowerCase().includes(q) ||
+                 (don.musicTitle || '').toLowerCase().includes(q) ||
+                 (don.artistName || '').toLowerCase().includes(q) ||
+                 (don.donorPhone || '').toLowerCase().includes(q) ||
+                 (don.id || '').toLowerCase().includes(q);
+        });
+
+        const filteredValidatedArtists = activeArtists.filter(art => {
+          if (!validationSearchQuery.trim()) return true;
+          const q = validationSearchQuery.toLowerCase().trim();
+          return (art.stageName || '').toLowerCase().includes(q) ||
+                 (art.name || '').toLowerCase().includes(q) ||
+                 (art.phone || '').toLowerCase().includes(q) ||
+                 (art.email || '').toLowerCase().includes(q);
+        });
+
+        // Filter rejected lists
+        const filteredRejectedDonations = rejectedDonations.filter(don => {
+          if (!validationSearchQuery.trim()) return true;
+          const q = validationSearchQuery.toLowerCase().trim();
+          return (don.donorName || '').toLowerCase().includes(q) ||
+                 (don.musicTitle || '').toLowerCase().includes(q) ||
+                 (don.artistName || '').toLowerCase().includes(q) ||
+                 (don.donorPhone || '').toLowerCase().includes(q) ||
+                 (don.id || '').toLowerCase().includes(q);
+        });
+
+        const filteredRejectedArtists = rejectedArtists.filter(art => {
+          if (!validationSearchQuery.trim()) return true;
+          const q = validationSearchQuery.toLowerCase().trim();
+          return (art.stageName || '').toLowerCase().includes(q) ||
+                 (art.name || '').toLowerCase().includes(q) ||
+                 (art.phone || '').toLowerCase().includes(q) ||
+                 (art.email || '').toLowerCase().includes(q);
+        });
 
         return (
           <div className="space-y-6 animate-fadeIn">
@@ -2475,538 +2724,948 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     )}
                   </h3>
                   <p className="text-xs text-slate-400 mt-1">
-                    Verifye foto prèv transfè Moncash / Natcash pou <strong>sipò fanatik</strong> ak <strong>frè enskripsyon nouvo atis ($4.99 USD)</strong> anvan w valide yo.
+                    Gere ak verifye prèv transfè Moncash / Natcash pou <strong>sipò fanatik</strong> ak <strong>frè enskripsyon atis ($4.99 USD)</strong>. Tout eleman valide oswa refize deplase otomatikman nan espas respektif yo.
                   </p>
                 </div>
 
                 <div className="flex items-center flex-wrap gap-2 text-xs">
                   <div className="inline-flex items-center gap-1.5 text-yellow-400 bg-yellow-500/10 px-3 py-1.5 rounded-xl border border-yellow-500/20 font-medium">
                     <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
-                    <span>Notifikasyon imèl & bwat mesaj voye otomatikman sou chak validasyon</span>
+                    <span>Sinkronizasyon Firestore an tan reyèl ak notifikasyon otomatik</span>
                   </div>
                 </div>
               </div>
 
-              {/* Sub-Filters / Tabs */}
-              <div className="flex items-center flex-wrap gap-2 pt-2 border-t border-white/[0.08]">
+              {/* Status Spaces Navigation Tabs */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-white/[0.08]">
                 <button
                   type="button"
-                  onClick={() => setValidationCategoryFilter('all')}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-                    validationCategoryFilter === 'all'
-                      ? 'bg-yellow-400 text-slate-950 shadow-md shadow-yellow-400/20'
-                      : 'bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 border border-white/[0.06]'
+                  onClick={() => setValidationStatusFilter('pending')}
+                  className={`p-3 rounded-2xl border transition-all text-left flex flex-col justify-between ${
+                    validationStatusFilter === 'pending'
+                      ? 'bg-amber-950/60 border-amber-400 shadow-lg shadow-amber-950/50 ring-1 ring-amber-400/50'
+                      : 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.07]'
                   }`}
                 >
-                  <Filter className="w-3.5 h-3.5" />
-                  <span>Tout Validasyon ({totalPendingAll})</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] uppercase font-bold text-amber-400 tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                      An Atant
+                    </span>
+                    <span className="text-xs font-mono font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full">
+                      {totalPendingAll}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-sm font-black text-white">
+                    {pendingArtists.length} atis • {pendingDonations.length} don
+                  </div>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setValidationCategoryFilter('artists')}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-                    validationCategoryFilter === 'artists'
-                      ? 'bg-amber-400 text-slate-950 shadow-md shadow-amber-400/20'
-                      : 'bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 border border-white/[0.06]'
+                  onClick={() => setValidationStatusFilter('validated')}
+                  className={`p-3 rounded-2xl border transition-all text-left flex flex-col justify-between ${
+                    validationStatusFilter === 'validated'
+                      ? 'bg-emerald-950/60 border-emerald-400 shadow-lg shadow-emerald-950/50 ring-1 ring-emerald-400/50'
+                      : 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.07]'
                   }`}
                 >
-                  <UserCheck className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Prèv Enskripsyon Atis $4.99 ({pendingArtists.length})</span>
-                  {pendingArtists.length > 0 && (
-                    <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-black">
-                      {pendingArtists.length}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] uppercase font-bold text-emerald-400 tracking-wider flex items-center gap-1.5">
+                      <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                      Valide / Aksepte
                     </span>
-                  )}
+                    <span className="text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full">
+                      {totalValidatedAll}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-sm font-black text-white">
+                    {activeArtists.length} atis • {validatedDonations.length} don
+                  </div>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setValidationCategoryFilter('donations')}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-                    validationCategoryFilter === 'donations'
-                      ? 'bg-emerald-400 text-slate-950 shadow-md shadow-emerald-400/20'
-                      : 'bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 border border-white/[0.06]'
+                  onClick={() => setValidationStatusFilter('rejected')}
+                  className={`p-3 rounded-2xl border transition-all text-left flex flex-col justify-between ${
+                    validationStatusFilter === 'rejected'
+                      ? 'bg-red-950/60 border-red-400 shadow-lg shadow-red-950/50 ring-1 ring-red-400/50'
+                      : 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.07]'
                   }`}
                 >
-                  <HeartHandshake className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Sipò Fanatik Mizik ({pendingDonations.length})</span>
-                  {pendingDonations.length > 0 && (
-                    <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-black">
-                      {pendingDonations.length}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] uppercase font-bold text-red-400 tracking-wider flex items-center gap-1.5">
+                      <XCircle className="w-3.5 h-3.5 text-red-400" />
+                      Refize
                     </span>
-                  )}
+                    <span className="text-xs font-mono font-bold bg-red-500/20 text-red-300 px-2 py-0.5 rounded-full">
+                      {totalRejectedAll}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-sm font-black text-white">
+                    {rejectedArtists.length} atis • {rejectedDonations.length} don
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setValidationStatusFilter('all')}
+                  className={`p-3 rounded-2xl border transition-all text-left flex flex-col justify-between ${
+                    validationStatusFilter === 'all'
+                      ? 'bg-blue-950/60 border-blue-400 shadow-lg shadow-blue-950/50 ring-1 ring-blue-400/50'
+                      : 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.07]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] uppercase font-bold text-slate-300 tracking-wider flex items-center gap-1.5">
+                      <Globe className="w-3.5 h-3.5 text-slate-400" />
+                      Tout Istorik
+                    </span>
+                    <span className="text-xs font-mono font-bold bg-white/10 text-slate-200 px-2 py-0.5 rounded-full">
+                      {totalAllRecords}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-sm font-black text-white">
+                    {effectiveArtists.length} atis • {effectiveDonations.length} don
+                  </div>
                 </button>
               </div>
-            </div>
 
-            {/* SECTION 1: ARTIST REGISTRATION PROOFS ($4.99 USD) */}
-            {(validationCategoryFilter === 'all' || validationCategoryFilter === 'artists') && (
-              <div className="bg-[#0a0f1d]/90 border border-amber-500/20 rounded-3xl p-5 sm:p-6 backdrop-blur-xl space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/[0.08]">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
-                      <UserCheck className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-base font-bold text-white flex items-center gap-2">
-                        <span>Prèv Peman Enskripsyon Atis ($4.99 USD)</span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono font-bold">
-                          {pendingArtists.length} an atant
-                        </span>
-                      </h4>
-                      <p className="text-xs text-slate-400">
-                        Atis ki fin fè tout etap enskripsyon yo epi ki voye foto resi transfè Moncash/Natcash yo.
-                      </p>
-                    </div>
-                  </div>
+              {/* Sub-Filters: Category & Live Search Bar */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-white/[0.08]">
+                <div className="flex items-center flex-wrap gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => setValidationCategoryFilter('all')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      validationCategoryFilter === 'all'
+                        ? 'bg-yellow-400 text-slate-950 shadow-md shadow-yellow-400/20'
+                        : 'bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 border border-white/[0.06]'
+                    }`}
+                  >
+                    <Filter className="w-3.5 h-3.5" />
+                    <span>Tout Kategori</span>
+                  </button>
 
-                  {pendingArtists.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setValidationCategoryFilter('artists')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      validationCategoryFilter === 'artists'
+                        ? 'bg-amber-400 text-slate-950 shadow-md shadow-amber-400/20'
+                        : 'bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 border border-white/[0.06]'
+                    }`}
+                  >
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>Enskripsyon Atis ($4.99)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setValidationCategoryFilter('donations')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      validationCategoryFilter === 'donations'
+                        ? 'bg-emerald-400 text-slate-950 shadow-md shadow-emerald-400/20'
+                        : 'bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 border border-white/[0.06]'
+                    }`}
+                  >
+                    <HeartHandshake className="w-3.5 h-3.5" />
+                    <span>Sipò Fanatik</span>
+                  </button>
+                </div>
+
+                {/* Live Search Input */}
+                <div className="relative w-full sm:w-72">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={validationSearchQuery}
+                    onChange={(e) => setValidationSearchQuery(e.target.value)}
+                    placeholder="Chèche non, tel, atis, mizik..."
+                    className="w-full bg-[#05070a] border border-white/[0.1] rounded-xl pl-9 pr-8 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-yellow-400 transition-colors"
+                  />
+                  {validationSearchQuery && (
                     <button
                       type="button"
-                      onClick={() => setActiveTab('artists_pending')}
-                      className="text-xs text-amber-400 hover:text-amber-300 underline font-semibold flex items-center gap-1"
+                      onClick={() => setValidationSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
                     >
-                      <span>Ouvri Sant Dosye Atis Konplè</span>
-                      <ArrowUpRight className="w-3 h-3" />
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
-
-                {pendingArtists.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-slate-500 bg-[#05070a]/60 rounded-2xl border border-white/[0.04]">
-                    Pa gen okenn prèv enskripsyon atis ki an atant kounye a. Tout kont atis yo ajou!
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {pendingArtists.map((art) => (
-                      <div
-                        key={art.id}
-                        className="bg-[#05070a]/90 border border-amber-500/30 hover:border-amber-400 transition-all rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 backdrop-blur-md shadow-lg shadow-amber-950/10"
-                      >
-                        <div className="flex items-start sm:items-center gap-3.5">
-                          {/* Proof Image Thumbnail */}
-                          {art.registrationProofUrl ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setProofModalInfo({
-                                  url: art.registrationProofUrl!,
-                                  title: `Prèv Enskripsyon Nouvo Atis ($4.99 USD) - ${art.stageName}`,
-                                  donorOrArtistName: `${art.stageName} (${art.name})`,
-                                  phone: art.phone || 'N/A',
-                                  amount: `$4.99 USD (~${Math.round(4.99 * exchangeRate).toLocaleString()} HTG)`,
-                                  musicTitle: `Enskripsyon Kont Atis • Vil: ${art.city || 'Ayiti'}`,
-                                  date: art.registrationDate,
-                                  type: 'artist_fee'
-                                });
-                                setProofZoom(1);
-                              }}
-                              className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border-2 border-amber-400/60 bg-black/60 shrink-0 group cursor-pointer shadow-lg hover:border-amber-400 transition-all"
-                              title="Klike pou wè foto prèv $4.99 la an gwo"
-                            >
-                              <img
-                                src={art.registrationProofUrl}
-                                alt={`Prèv ${art.stageName}`}
-                                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                              />
-                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                <Eye className="w-5 h-5 text-amber-300" />
-                              </div>
-                              <span className="absolute bottom-1 right-1 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded shadow">
-                                $4.99
-                              </span>
-                            </button>
-                          ) : (
-                            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl border border-white/[0.08] bg-white/[0.02] flex flex-col items-center justify-center text-[9px] text-slate-500 shrink-0 text-center p-1">
-                              <ImageIcon className="w-5 h-5 text-slate-600 mb-0.5" />
-                              <span>San Prèv</span>
-                            </div>
-                          )}
-
-                          {/* Artist Details */}
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-black text-white text-base tracking-tight">{art.stageName}</span>
-                              <span className="text-xs text-slate-400 font-medium">({art.name})</span>
-                              <span className="text-xs font-mono font-bold text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/30">
-                                Frè Enskripsyon: $4.99 USD (~{Math.round(4.99 * exchangeRate).toLocaleString()} HTG)
-                              </span>
-                              <span className="text-[10px] text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20 font-mono">
-                                ⏳ An Atant Validasyon
-                              </span>
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-x-3 text-xs text-slate-300">
-                              <span>📍 Vil: <strong className="text-slate-200">{art.city || 'Ayiti'}</strong></span>
-                              <span>📞 Tel: <strong className="text-amber-300 font-mono">{art.phone || 'N/A'}</strong></span>
-                              <span>✉️ Imèl: <strong className="text-blue-300 font-mono">{art.email}</strong></span>
-                              {art.registrationDate && (
-                                <span>🕒 Dat: <strong className="text-slate-400">{art.registrationDate}</strong></span>
-                              )}
-                            </div>
-
-                            {art.musicalRoots && (
-                              <p className="text-[11px] text-slate-400 line-clamp-1">
-                                Estil / Rasin: <span className="text-slate-300 font-medium">{art.musicalRoots}</span>
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Action Buttons */}
-                        <div className="flex items-center gap-2 shrink-0 self-end md:self-center flex-wrap">
-                          {art.registrationProofUrl && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setProofModalInfo({
-                                  url: art.registrationProofUrl!,
-                                  title: `Prèv Enskripsyon Nouvo Atis ($4.99 USD) - ${art.stageName}`,
-                                  donorOrArtistName: `${art.stageName} (${art.name})`,
-                                  phone: art.phone || 'N/A',
-                                  amount: `$4.99 USD (~${Math.round(4.99 * exchangeRate).toLocaleString()} HTG)`,
-                                  musicTitle: `Enskripsyon Kont Atis • Vil: ${art.city || 'Ayiti'}`,
-                                  date: art.registrationDate,
-                                  type: 'artist_fee'
-                                });
-                                setProofZoom(1);
-                              }}
-                              className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/[0.06] text-blue-400 hover:bg-white/[0.12] flex items-center gap-1.5 border border-white/[0.08] transition-colors"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              <span>Gade Prèv</span>
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => setSelectedArtistDossier(art)}
-                            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/[0.06] text-amber-300 hover:bg-white/[0.12] flex items-center gap-1.5 border border-white/[0.08] transition-colors"
-                            title="Gade tout detay biyografi, foto ak rezo sosyal atis la"
-                          >
-                            <FileText className="w-3.5 h-3.5" />
-                            <span>Gade Dosye</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => onValidateArtist(art.id, true)}
-                            className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 shadow-lg shadow-emerald-950/40 transition-all active:scale-95"
-                            title="Valide kont atis sa a epi aktive aksè li"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Valide Atis ($4.99)</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const reason = window.prompt(
-                                `Rezon refi pou ${art.stageName} (Foto pa klè, referans kòrèk, elatriye):`,
-                                'Foto prèv transfè a pa klè oswa referans lan pa koresponn. Tanpri telechaje yon nouvo prèv.'
-                              );
-                              if (reason !== null) {
-                                onValidateArtist(art.id, false, reason);
-                              }
-                            }}
-                            className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white flex items-center gap-1 shadow-lg shadow-red-950/40 transition-all active:scale-95"
-                            title="Refize demand enskripsyon sa a"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                            <span>Refize</span>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
-            )}
-
-            {/* SECTION 2: FAN MUSIC DONATIONS */}
-            {(validationCategoryFilter === 'all' || validationCategoryFilter === 'donations') && (
-              <div className="bg-[#0a0f1d]/90 border border-white/[0.08] rounded-3xl p-5 sm:p-6 backdrop-blur-xl space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/[0.08]">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-yellow-500/20 border border-yellow-500/30 flex items-center justify-center text-yellow-400">
-                      <DollarSign className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-base font-bold text-white flex items-center gap-2">
-                        <span>Sipò Fanatik pou Moso Mizik</span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 font-mono font-bold">
-                          {pendingDonations.length} an atant
-                        </span>
-                      </h4>
-                      <p className="text-xs text-slate-400">
-                        Donasyon fanatik voye pou ankouraje atis yo sou moso mizik yo.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {pendingDonations.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-slate-500 bg-[#05070a]/60 rounded-2xl border border-white/[0.04]">
-                    Pa gen okenn sipò mizik ki an atant pou kounya. Tout donasyon yo ajou!
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {pendingDonations.map((don) => (
-                      <div
-                        key={don.id}
-                        className="bg-[#05070a]/90 border border-white/[0.08] hover:border-yellow-400/30 transition-all rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 backdrop-blur-md"
-                      >
-                        <div className="flex items-start sm:items-center gap-3.5">
-                          {/* Interactive Proof Image Thumbnail */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setProofModalInfo({
-                                url: don.proofUrl,
-                                title: `Prèv Sipò MonCash / Natcash - $${don.amount} ${don.currency || 'USD'}`,
-                                donorOrArtistName: don.donorName,
-                                phone: don.donorPhone || 'Pa gen nimewo',
-                                amount: `$${don.amount} ${don.currency || 'USD'}`,
-                                musicTitle: `${don.musicTitle} (${don.artistName})`,
-                                date: don.createdAt,
-                                type: 'support'
-                              });
-                              setProofZoom(1);
-                            }}
-                            className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border-2 border-yellow-400/40 bg-black/60 shrink-0 group cursor-pointer shadow-lg hover:border-yellow-400 transition-all"
-                            title="Klike pou wè foto prèv la an gwo"
-                          >
-                            <img
-                              src={don.proofUrl}
-                              alt={`Prèv ${don.donorName}`}
-                              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                            />
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                              <Eye className="w-5 h-5 text-yellow-400" />
-                            </div>
-                            <span className="absolute bottom-1 right-1 bg-black/80 text-yellow-400 text-[9px] font-bold px-1 rounded">
-                              Prèv
-                            </span>
-                          </button>
-
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-bold text-white text-sm">{don.donorName}</span>
-                              <span className="text-yellow-400 font-mono font-bold text-xs bg-yellow-400/10 px-2 py-0.5 rounded border border-yellow-400/20">
-                                ${don.amount.toFixed(2)} USD (~{Math.round(toHtg(don.amount)).toLocaleString()} HTG)
-                              </span>
-                              <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                                85% Atis: ${(don.amount * 0.85).toFixed(2)} (~{Math.round(toHtg(don.amount * 0.85)).toLocaleString()} HTG)
-                              </span>
-                              <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
-                                15% Sit: ${(don.amount * 0.15).toFixed(2)} (~{Math.round(toHtg(don.amount * 0.15)).toLocaleString()} HTG)
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-300">
-                              Pou: <strong className="text-white">{don.musicTitle}</strong> ({don.artistName})
-                            </p>
-                            <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-slate-400">
-                              {don.paymentMethod && (
-                                <span className="text-yellow-300 font-bold bg-yellow-400/15 px-2 py-0.5 rounded border border-yellow-400/30">
-                                  💳 Mwayen: {don.paymentMethod}
-                                </span>
-                              )}
-                              <span>📞 Tel: <strong className="text-slate-200">{don.donorPhone || 'N/A'}</strong></span>
-                              <span>🕒 Dat: {don.createdAt}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
-                          <button
-                            onClick={() => {
-                              setProofModalInfo({
-                                url: don.proofUrl,
-                                title: `Prèv Sipò MonCash / Natcash - $${don.amount} ${don.currency || 'USD'} (~${Math.round(toHtg(don.amount)).toLocaleString()} HTG)`,
-                                donorOrArtistName: don.donorName,
-                                phone: don.donorPhone || 'Pa gen nimewo',
-                                amount: `$${don.amount} ${don.currency || 'USD'} (~${Math.round(toHtg(don.amount)).toLocaleString()} HTG)`,
-                                musicTitle: `${don.musicTitle} (${don.artistName})`,
-                                date: don.createdAt,
-                                type: 'support'
-                              });
-                              setProofZoom(1);
-                            }}
-                            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/[0.06] text-blue-400 hover:bg-white/[0.12] flex items-center gap-1.5 border border-white/[0.08] transition-colors"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>Gade Prèv</span>
-                          </button>
-                          <button
-                            onClick={() => onValidateDonation(don.id, true)}
-                            className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 shadow-lg shadow-emerald-950/40 transition-all active:scale-95"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Valide</span>
-                          </button>
-                          <button
-                            onClick={() => onValidateDonation(don.id, false)}
-                            className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white flex items-center gap-1 shadow-lg shadow-red-950/40 transition-all active:scale-95"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                            <span>Refize</span>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Validated Donations History & Split Breakdown */}
-            <div className="bg-[#0a0f1d]/90 border border-white/[0.08] rounded-3xl p-6 backdrop-blur-xl space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <HeartHandshake className="w-5 h-5 text-emerald-400" />
-                    <span>Istorik Sipò Valide ({validatedDonations.length})</span>
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Detay distribisyon lajan pou chak tranzaksyon: <strong>85% pou Atis</strong> ak <strong>15% pou Platfòm UpMizik</strong> (kalkile an USD ak HTG)
-                  </p>
-                </div>
-
-                <div className="inline-flex items-center gap-2 bg-emerald-950/40 border border-emerald-500/30 px-3 py-1.5 rounded-xl text-xs">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span className="text-emerald-300 font-semibold">Pousantaj Otomatik: 85% Atis / 15% Sit</span>
-                </div>
-              </div>
-
-              {/* Micro Summary Stats for Validated Donations */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-[#05070a]/90 rounded-2xl border border-white/[0.06]">
-                <div className="space-y-0.5">
-                  <span className="text-[10px] uppercase font-bold text-slate-400">Total Sipò Valide (100%)</span>
-                  <p className="text-lg font-black text-yellow-400 font-mono">
-                    ${validatedGross.toFixed(2)} <span className="text-xs font-sans text-yellow-300">USD</span>
-                  </p>
-                  <p className="text-xs font-bold text-slate-300 font-mono">
-                    ~{Math.round(toHtg(validatedGross)).toLocaleString()} <span className="text-[10px] text-slate-400 font-sans">HTG</span>
-                  </p>
-                  <p className="text-[10px] text-slate-500">{validatedDonations.length} tranzaksyon konfime</p>
-                </div>
-
-                <div className="space-y-0.5 border-t sm:border-t-0 sm:border-l border-white/[0.08] pt-2 sm:pt-0 sm:pl-4">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] uppercase font-bold text-emerald-400">Total Pati Atis Yo (85%)</span>
-                    <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-bold">85%</span>
-                  </div>
-                  <p className="text-lg font-black text-emerald-400 font-mono">
-                    ${validatedArtistPayouts.toFixed(2)} <span className="text-xs font-sans text-emerald-300">USD</span>
-                  </p>
-                  <p className="text-xs font-bold text-slate-300 font-mono">
-                    ~{Math.round(toHtg(validatedArtistPayouts)).toLocaleString()} <span className="text-[10px] text-slate-400 font-sans">HTG</span>
-                  </p>
-                  <p className="text-[10px] text-slate-500">Kòb k ap monte pou atis yo</p>
-                </div>
-
-                <div className="space-y-0.5 border-t sm:border-t-0 sm:border-l border-white/[0.08] pt-2 sm:pt-0 sm:pl-4">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] uppercase font-bold text-blue-400">Total Pati Sit UpMizik (15%)</span>
-                    <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.2 rounded font-bold">15%</span>
-                  </div>
-                  <p className="text-lg font-black text-blue-400 font-mono">
-                    ${validatedPlatformRevenue.toFixed(2)} <span className="text-xs font-sans text-blue-300">USD</span>
-                  </p>
-                  <p className="text-xs font-bold text-slate-300 font-mono">
-                    ~{Math.round(toHtg(validatedPlatformRevenue)).toLocaleString()} <span className="text-[10px] text-slate-400 font-sans">HTG</span>
-                  </p>
-                  <p className="text-[10px] text-slate-500">Reveni jesyon sèvè & devlopman</p>
-                </div>
-              </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-300">
-                <thead className="bg-[#05070a]/90 text-slate-400 uppercase text-[10px] border-b border-white/[0.08]">
-                  <tr>
-                    <th className="px-4 py-3">Donatè & Kontak</th>
-                    <th className="px-4 py-3">Mizik / Atis</th>
-                    <th className="px-4 py-3">Prèv Foto</th>
-                    <th className="px-4 py-3 text-yellow-400">Montan Total ($ / HTG)</th>
-                    <th className="px-4 py-3 text-emerald-400">Pati Atis (85%)</th>
-                    <th className="px-4 py-3 text-blue-400">Pati Sit la (15%)</th>
-                    <th className="px-4 py-3">Dat & ID</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/[0.06]">
-                  {validatedDonations.map((d) => {
-                    const artistPart = d.artistShare || Number((d.amount * 0.85).toFixed(2));
-                    const platformPart = d.platformShare || Number((d.amount * 0.15).toFixed(2));
-                    return (
-                      <tr key={d.id} className="hover:bg-white/[0.02] transition-colors">
-                        <td className="px-4 py-3">
-                          <div className="font-semibold text-white">{d.donorName}</div>
-                          <div className="text-[10px] text-slate-400 font-mono">{d.donorPhone || 'Pa gen nimewo'}</div>
-                          {d.paymentMethod && (
-                            <div className="text-[9px] text-yellow-300 font-mono mt-0.5">{d.paymentMethod}</div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-white">{d.musicTitle}</div>
-                          <div className="text-[10px] text-yellow-400">{d.artistName}</div>
-                        </td>
-                        <td className="px-4 py-3">
-                          {d.proofUrl ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setProofModalInfo({
-                                  url: d.proofUrl,
-                                  title: `Prèv Sipò Valide - $${d.amount} ${d.currency || 'USD'} (~${Math.round(toHtg(d.amount)).toLocaleString()} HTG)`,
-                                  donorOrArtistName: d.donorName,
-                                  phone: d.donorPhone || 'Pa gen nimewo',
-                                  amount: `$${d.amount} ${d.currency || 'USD'} (~${Math.round(toHtg(d.amount)).toLocaleString()} HTG)`,
-                                  musicTitle: `${d.musicTitle} (${d.artistName})`,
-                                  date: d.createdAt,
-                                  type: 'support'
-                                });
-                                setProofZoom(1);
-                              }}
-                              className="flex items-center gap-1.5 p-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.1] border border-white/[0.08] transition-colors group"
-                              title="Klike pou wè foto prèv tranzaksyon sa a"
-                            >
-                              <img
-                                src={d.proofUrl}
-                                alt="Prèv"
-                                className="w-8 h-8 rounded-md object-cover border border-yellow-400/30"
-                              />
-                              <span className="text-[11px] font-semibold text-yellow-400 group-hover:underline pr-1">
-                                Wè Prèv
-                              </span>
-                            </button>
-                          ) : (
-                            <span className="text-slate-600 text-[11px]">Pa gen foto</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {renderDualAmount(d.amount, { colorUsd: 'font-mono font-bold text-yellow-400 text-xs', colorHtg: 'text-yellow-400/80' })}
-                        </td>
-                        <td className="px-4 py-3">
-                          {renderDualAmount(artistPart, { colorUsd: 'font-mono font-bold text-emerald-400 text-xs', colorHtg: 'text-emerald-400/80', boldHtg: true })}
-                        </td>
-                        <td className="px-4 py-3">
-                          {renderDualAmount(platformPart, { colorUsd: 'font-mono font-bold text-blue-400 text-xs', colorHtg: 'text-blue-400/80' })}
-                        </td>
-                        <td className="px-4 py-3 text-slate-400 text-[10px] font-mono">
-                          <div>{d.createdAt}</div>
-                          <div className="text-slate-500">#{d.id.slice(-6)}</div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
             </div>
+
+            {/* ================= SPACE 1: AN ATANT (PENDING) ================= */}
+            {(validationStatusFilter === 'pending' || validationStatusFilter === 'all') && (
+              <div className="space-y-6">
+                {validationStatusFilter === 'all' && (
+                  <div className="flex items-center gap-2 text-amber-400 font-black text-sm uppercase tracking-wider">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+                    <span>Espas 1: Dosye ki An Atant Validasyon ({totalPendingAll})</span>
+                  </div>
+                )}
+
+                {/* SECTION 1.A: PENDING ARTIST REGISTRATIONS ($4.99 USD) */}
+                {(validationCategoryFilter === 'all' || validationCategoryFilter === 'artists') && (
+                  <div className="bg-[#0a0f1d]/90 border border-amber-500/20 rounded-3xl p-5 sm:p-6 backdrop-blur-xl space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/[0.08]">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                          <UserCheck className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-base font-bold text-white flex items-center gap-2">
+                            <span>Prèv Peman Enskripsyon Atis ($4.99 USD)</span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono font-bold">
+                              {filteredPendingArtists.length} an atant
+                            </span>
+                          </h4>
+                          <p className="text-xs text-slate-400">
+                            Atis ki fin fè tout etap enskripsyon yo epi ki voye foto resi transfè Moncash/Natcash yo.
+                          </p>
+                        </div>
+                      </div>
+
+                      {filteredPendingArtists.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('artists_pending')}
+                          className="text-xs text-amber-400 hover:text-amber-300 underline font-semibold flex items-center gap-1"
+                        >
+                          <span>Ouvri Sant Dosye Atis Konplè</span>
+                          <ArrowUpRight className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+
+                    {filteredPendingArtists.length === 0 ? (
+                      <div className="py-6 text-center text-xs text-slate-500 bg-[#05070a]/60 rounded-2xl border border-white/[0.04]">
+                        {validationSearchQuery ? 'Pa gen okenn prèv atis an atant ki koresponn ak rechèch ou a.' : 'Pa gen okenn prèv enskripsyon atis ki an atant kounye a. Tout kont atis yo ajou!'}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {filteredPendingArtists.map((art) => (
+                          <div
+                            key={art.id}
+                            className="bg-[#05070a]/90 border border-amber-500/30 hover:border-amber-400 transition-all rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 backdrop-blur-md shadow-lg shadow-amber-950/10"
+                          >
+                            <div className="flex items-start sm:items-center gap-3.5">
+                              {/* Proof Image Thumbnail */}
+                              {art.registrationProofUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setProofModalInfo({
+                                      url: art.registrationProofUrl!,
+                                      title: `Prèv Enskripsyon Nouvo Atis ($4.99 USD) - ${art.stageName}`,
+                                      donorOrArtistName: `${art.stageName} (${art.name})`,
+                                      phone: art.phone || 'N/A',
+                                      amount: `$4.99 USD (~${Math.round(4.99 * exchangeRate).toLocaleString()} HTG)`,
+                                      musicTitle: `Enskripsyon Kont Atis • Vil: ${art.city || 'Ayiti'}`,
+                                      date: art.registrationDate,
+                                      type: 'artist_fee'
+                                    });
+                                    setProofZoom(1);
+                                  }}
+                                  className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border-2 border-amber-400/60 bg-black/60 shrink-0 group cursor-pointer shadow-lg hover:border-amber-400 transition-all"
+                                  title="Klike pou wè foto prèv $4.99 la an gwo"
+                                >
+                                  <img
+                                    src={art.registrationProofUrl}
+                                    alt={`Prèv ${art.stageName}`}
+                                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                                  />
+                                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                    <Eye className="w-5 h-5 text-amber-300" />
+                                  </div>
+                                  <span className="absolute bottom-1 right-1 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded shadow">
+                                    $4.99
+                                  </span>
+                                </button>
+                              ) : (
+                                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl border border-white/[0.08] bg-white/[0.02] flex flex-col items-center justify-center text-[9px] text-slate-500 shrink-0 text-center p-1">
+                                  <ImageIcon className="w-5 h-5 text-slate-600 mb-0.5" />
+                                  <span>San Prèv</span>
+                                </div>
+                              )}
+
+                              {/* Artist Details */}
+                              <div className="space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-black text-white text-base tracking-tight">{art.stageName}</span>
+                                  <span className="text-xs text-slate-400 font-medium">({art.name})</span>
+                                  <span className="text-xs font-mono font-bold text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/30">
+                                    Frè Enskripsyon: $4.99 USD (~{Math.round(4.99 * exchangeRate).toLocaleString()} HTG)
+                                  </span>
+                                  <span className="text-[10px] text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20 font-mono">
+                                    ⏳ An Atant Validasyon
+                                  </span>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-x-3 text-xs text-slate-300">
+                                  <span>📍 Vil: <strong className="text-slate-200">{art.city || 'Ayiti'}</strong></span>
+                                  <span>📞 Tel: <strong className="text-amber-300 font-mono">{art.phone || 'N/A'}</strong></span>
+                                  <span>✉️ Imèl: <strong className="text-blue-300 font-mono">{art.email}</strong></span>
+                                  {art.registrationDate && (
+                                    <span>🕒 Dat: <strong className="text-slate-400">{art.registrationDate}</strong></span>
+                                  )}
+                                </div>
+
+                                {art.musicalRoots && (
+                                  <p className="text-[11px] text-slate-400 line-clamp-1">
+                                    Estil / Rasin: <span className="text-slate-300 font-medium">{art.musicalRoots}</span>
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="flex items-center gap-2 shrink-0 self-end md:self-center flex-wrap">
+                              {art.registrationProofUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setProofModalInfo({
+                                      url: art.registrationProofUrl!,
+                                      title: `Prèv Enskripsyon Nouvo Atis ($4.99 USD) - ${art.stageName}`,
+                                      donorOrArtistName: `${art.stageName} (${art.name})`,
+                                      phone: art.phone || 'N/A',
+                                      amount: `$4.99 USD (~${Math.round(4.99 * exchangeRate).toLocaleString()} HTG)`,
+                                      musicTitle: `Enskripsyon Kont Atis • Vil: ${art.city || 'Ayiti'}`,
+                                      date: art.registrationDate,
+                                      type: 'artist_fee'
+                                    });
+                                    setProofZoom(1);
+                                  }}
+                                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/[0.06] text-blue-400 hover:bg-white/[0.12] flex items-center gap-1.5 border border-white/[0.08] transition-colors"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>Gade Prèv</span>
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => setSelectedArtistDossier(art)}
+                                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/[0.06] text-amber-300 hover:bg-white/[0.12] flex items-center gap-1.5 border border-white/[0.08] transition-colors"
+                                title="Gade tout detay biyografi, foto ak rezo sosyal atis la"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                <span>Gade Dosye</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleOptimisticValidateArtist(art.id, true)}
+                                className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 shadow-lg shadow-emerald-950/40 transition-all active:scale-95"
+                                title="Valide kont atis sa a epi deplase l nan Espas Valide"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Valide Atis ($4.99)</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const reason = window.prompt(
+                                    `Rezon refi pou ${art.stageName} (Foto pa klè, referans kòrèk, elatriye):`,
+                                    'Foto prèv transfè a pa klè oswa referans lan pa koresponn. Tanpri telechaje yon nouvo prèv.'
+                                  );
+                                  if (reason !== null) {
+                                    handleOptimisticValidateArtist(art.id, false, reason);
+                                  }
+                                }}
+                                className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white flex items-center gap-1 shadow-lg shadow-red-950/40 transition-all active:scale-95"
+                                title="Refize demand enskripsyon sa a epi deplase l nan Espas Refize"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                <span>Refize</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* SECTION 1.B: PENDING FAN DONATIONS */}
+                {(validationCategoryFilter === 'all' || validationCategoryFilter === 'donations') && (
+                  <div className="bg-[#0a0f1d]/90 border border-white/[0.08] rounded-3xl p-5 sm:p-6 backdrop-blur-xl space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/[0.08]">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-yellow-500/20 border border-yellow-500/30 flex items-center justify-center text-yellow-400">
+                          <DollarSign className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-base font-bold text-white flex items-center gap-2">
+                            <span>Sipò Fanatik pou Moso Mizik</span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 font-mono font-bold">
+                              {filteredPendingDonations.length} an atant
+                            </span>
+                          </h4>
+                          <p className="text-xs text-slate-400">
+                            Donasyon fanatik voye pou ankouraje atis yo sou moso mizik yo.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {filteredPendingDonations.length === 0 ? (
+                      <div className="py-6 text-center text-xs text-slate-500 bg-[#05070a]/60 rounded-2xl border border-white/[0.04]">
+                        {validationSearchQuery ? 'Pa gen okenn sipò an atant ki koresponn ak rechèch ou a.' : 'Pa gen okenn sipò mizik ki an atant pou kounya. Tout donasyon yo ajou!'}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {filteredPendingDonations.map((don) => (
+                          <div
+                            key={don.id}
+                            className="bg-[#05070a]/90 border border-white/[0.08] hover:border-yellow-400/30 transition-all rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 backdrop-blur-md"
+                          >
+                            <div className="flex items-start sm:items-center gap-3.5">
+                              {/* Interactive Proof Image Thumbnail */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setProofModalInfo({
+                                    url: don.proofUrl,
+                                    title: `Prèv Sipò MonCash / Natcash - $${don.amount} ${don.currency || 'USD'}`,
+                                    donorOrArtistName: don.donorName,
+                                    phone: don.donorPhone || 'Pa gen nimewo',
+                                    amount: `$${don.amount} ${don.currency || 'USD'}`,
+                                    musicTitle: `${don.musicTitle} (${don.artistName})`,
+                                    date: don.createdAt,
+                                    type: 'support'
+                                  });
+                                  setProofZoom(1);
+                                }}
+                                className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border-2 border-yellow-400/40 bg-black/60 shrink-0 group cursor-pointer shadow-lg hover:border-yellow-400 transition-all"
+                                title="Klike pou wè foto prèv la an gwo"
+                              >
+                                <img
+                                  src={don.proofUrl}
+                                  alt={`Prèv ${don.donorName}`}
+                                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                                />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <Eye className="w-5 h-5 text-yellow-400" />
+                                </div>
+                                <span className="absolute bottom-1 right-1 bg-black/80 text-yellow-400 text-[9px] font-bold px-1 rounded">
+                                  Prèv
+                                </span>
+                              </button>
+
+                              <div className="space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-bold text-white text-sm">{don.donorName}</span>
+                                  <span className="text-yellow-400 font-mono font-bold text-xs bg-yellow-400/10 px-2 py-0.5 rounded border border-yellow-400/20">
+                                    ${don.amount.toFixed(2)} USD (~{Math.round(toHtg(don.amount)).toLocaleString()} HTG)
+                                  </span>
+                                  <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                                    85% Atis: ${(don.amount * 0.85).toFixed(2)} (~{Math.round(toHtg(don.amount * 0.85)).toLocaleString()} HTG)
+                                  </span>
+                                  <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
+                                    15% Sit: ${(don.amount * 0.15).toFixed(2)} (~{Math.round(toHtg(don.amount * 0.15)).toLocaleString()} HTG)
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-300">
+                                  Pou: <strong className="text-white">{don.musicTitle}</strong> ({don.artistName})
+                                </p>
+                                <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-slate-400">
+                                  {don.paymentMethod && (
+                                    <span className="text-yellow-300 font-bold bg-yellow-400/15 px-2 py-0.5 rounded border border-yellow-400/30">
+                                      💳 Mwayen: {don.paymentMethod}
+                                    </span>
+                                  )}
+                                  <span>📞 Tel: <strong className="text-slate-200">{don.donorPhone || 'N/A'}</strong></span>
+                                  <span>🕒 Dat: {don.createdAt}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                              <button
+                                onClick={() => {
+                                  setProofModalInfo({
+                                    url: don.proofUrl,
+                                    title: `Prèv Sipò MonCash / Natcash - $${don.amount} ${don.currency || 'USD'} (~${Math.round(toHtg(don.amount)).toLocaleString()} HTG)`,
+                                    donorOrArtistName: don.donorName,
+                                    phone: don.donorPhone || 'Pa gen nimewo',
+                                    amount: `$${don.amount} ${don.currency || 'USD'} (~${Math.round(toHtg(don.amount)).toLocaleString()} HTG)`,
+                                    musicTitle: `${don.musicTitle} (${don.artistName})`,
+                                    date: don.createdAt,
+                                    type: 'support'
+                                  });
+                                  setProofZoom(1);
+                                }}
+                                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/[0.06] text-blue-400 hover:bg-white/[0.12] flex items-center gap-1.5 border border-white/[0.08] transition-colors"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>Gade Prèv</span>
+                              </button>
+                              <button
+                                onClick={() => handleOptimisticValidateDonation(don.id, true)}
+                                className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 shadow-lg shadow-emerald-950/40 transition-all active:scale-95"
+                                title="Valide don sa a epi deplase l nan Espas Valide"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Valide</span>
+                              </button>
+                              <button
+                                onClick={() => handleOptimisticValidateDonation(don.id, false)}
+                                className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white flex items-center gap-1 shadow-lg shadow-red-950/40 transition-all active:scale-95"
+                                title="Refize don sa a epi deplase l nan Espas Refize"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                <span>Refize</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ================= SPACE 2: ESPAS VALIDE (ACCEPTED) ================= */}
+            {(validationStatusFilter === 'validated' || validationStatusFilter === 'all') && (
+              <div className="space-y-6">
+                {validationStatusFilter === 'all' && (
+                  <div className="flex items-center gap-2 text-emerald-400 font-black text-sm uppercase tracking-wider pt-4 border-t border-white/[0.08]">
+                    <CheckCircle className="w-4 h-4 text-emerald-400" />
+                    <span>Espas 2: Dosye ki Valide & Aksepte ({totalValidatedAll})</span>
+                  </div>
+                )}
+
+                {/* Validated Artists List */}
+                {(validationCategoryFilter === 'all' || validationCategoryFilter === 'artists') && (
+                  <div className="bg-[#0a0f1d]/90 border border-emerald-500/20 rounded-3xl p-5 sm:p-6 backdrop-blur-xl space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/[0.08]">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                          <UserCheck className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-base font-bold text-white flex items-center gap-2">
+                            <span>Atis Valide & Aktif sou Platfòm lan</span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono font-bold">
+                              {filteredValidatedArtists.length} atis
+                            </span>
+                          </h4>
+                          <p className="text-xs text-slate-400">
+                            Atis ki gen frè enskripsyon $4.99 yo konfime epi kont yo aktif.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {filteredValidatedArtists.length === 0 ? (
+                      <div className="py-6 text-center text-xs text-slate-500 bg-[#05070a]/60 rounded-2xl border border-white/[0.04]">
+                        {validationSearchQuery ? 'Pa gen okenn atis valide ki koresponn ak rechèch la.' : 'Pa gen okenn atis valide kounye a.'}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {filteredValidatedArtists.map((art) => (
+                          <div
+                            key={art.id}
+                            className="bg-[#05070a]/90 border border-emerald-500/30 hover:border-emerald-400/60 transition-all rounded-2xl p-4 flex items-center justify-between gap-3"
+                          >
+                            <div className="flex items-center gap-3 overflow-hidden">
+                              <img
+                                src={art.avatarUrl || art.registrationProofUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100&auto=format&fit=crop&q=60'}
+                                alt={art.stageName}
+                                className="w-11 h-11 rounded-xl object-cover border border-emerald-500/40 shrink-0"
+                              />
+                              <div className="min-w-0">
+                                <h5 className="font-bold text-white text-sm truncate">{art.stageName}</h5>
+                                <p className="text-[11px] text-slate-400 truncate">{art.phone || art.email || 'N/A'}</p>
+                                <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
+                                  <Check className="w-3 h-3 text-emerald-400" /> Kont Aktif
+                                </span>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setSelectedArtistDossier(art)}
+                              className="p-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 hover:text-white transition-colors shrink-0"
+                              title="Gade dosye konplè atis la"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Validated Donations History & Split Breakdown */}
+                {(validationCategoryFilter === 'all' || validationCategoryFilter === 'donations') && (
+                  <div className="bg-[#0a0f1d]/90 border border-white/[0.08] rounded-3xl p-6 backdrop-blur-xl space-y-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-base font-bold text-white flex items-center gap-2">
+                          <HeartHandshake className="w-5 h-5 text-emerald-400" />
+                          <span>Istorik Sipò Valide ({filteredValidatedDonations.length})</span>
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Detay distribisyon lajan: <strong>85% pou Atis</strong> ak <strong>15% pou Platfòm UpMizik</strong>
+                        </p>
+                      </div>
+
+                      <div className="inline-flex items-center gap-2 bg-emerald-950/40 border border-emerald-500/30 px-3 py-1.5 rounded-xl text-xs">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className="text-emerald-300 font-semibold">Pousantaj Otomatik: 85% Atis / 15% Sit</span>
+                      </div>
+                    </div>
+
+                    {/* Micro Summary Stats for Validated Donations */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-[#05070a]/90 rounded-2xl border border-white/[0.06]">
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] uppercase font-bold text-slate-400">Total Sipò Valide (100%)</span>
+                        <p className="text-lg font-black text-yellow-400 font-mono">
+                          ${validatedGross.toFixed(2)} <span className="text-xs font-sans text-yellow-300">USD</span>
+                        </p>
+                        <p className="text-xs font-bold text-slate-300 font-mono">
+                          ~{Math.round(toHtg(validatedGross)).toLocaleString()} <span className="text-[10px] text-slate-400 font-sans">HTG</span>
+                        </p>
+                        <p className="text-[10px] text-slate-500">{validatedDonations.length} tranzaksyon konfime</p>
+                      </div>
+
+                      <div className="space-y-0.5 border-t sm:border-t-0 sm:border-l border-white/[0.08] pt-2 sm:pt-0 sm:pl-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] uppercase font-bold text-emerald-400">Total Pati Atis Yo (85%)</span>
+                          <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-bold">85%</span>
+                        </div>
+                        <p className="text-lg font-black text-emerald-400 font-mono">
+                          ${validatedArtistPayouts.toFixed(2)} <span className="text-xs font-sans text-emerald-300">USD</span>
+                        </p>
+                        <p className="text-xs font-bold text-slate-300 font-mono">
+                          ~{Math.round(toHtg(validatedArtistPayouts)).toLocaleString()} <span className="text-[10px] text-slate-400 font-sans">HTG</span>
+                        </p>
+                        <p className="text-[10px] text-slate-500">Kòb k ap monte pou atis yo</p>
+                      </div>
+
+                      <div className="space-y-0.5 border-t sm:border-t-0 sm:border-l border-white/[0.08] pt-2 sm:pt-0 sm:pl-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] uppercase font-bold text-blue-400">Total Pati Sit UpMizik (15%)</span>
+                          <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.2 rounded font-bold">15%</span>
+                        </div>
+                        <p className="text-lg font-black text-blue-400 font-mono">
+                          ${validatedPlatformRevenue.toFixed(2)} <span className="text-xs font-sans text-blue-300">USD</span>
+                        </p>
+                        <p className="text-xs font-bold text-slate-300 font-mono">
+                          ~{Math.round(toHtg(validatedPlatformRevenue)).toLocaleString()} <span className="text-[10px] text-slate-400 font-sans">HTG</span>
+                        </p>
+                        <p className="text-[10px] text-slate-500">Reveni jesyon sèvè & devlopman</p>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs text-slate-300">
+                        <thead className="bg-[#05070a]/90 text-slate-400 uppercase text-[10px] border-b border-white/[0.08]">
+                          <tr>
+                            <th className="px-4 py-3">Donatè & Kontak</th>
+                            <th className="px-4 py-3">Mizik / Atis</th>
+                            <th className="px-4 py-3">Prèv Foto</th>
+                            <th className="px-4 py-3 text-yellow-400">Montan Total ($ / HTG)</th>
+                            <th className="px-4 py-3 text-emerald-400">Pati Atis (85%)</th>
+                            <th className="px-4 py-3 text-blue-400">Pati Sit la (15%)</th>
+                            <th className="px-4 py-3">Dat & ID</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/[0.06]">
+                          {filteredValidatedDonations.map((d) => {
+                            const artistPart = d.artistShare || Number((d.amount * 0.85).toFixed(2));
+                            const platformPart = d.platformShare || Number((d.amount * 0.15).toFixed(2));
+                            return (
+                              <tr key={d.id} className="hover:bg-white/[0.02] transition-colors">
+                                <td className="px-4 py-3">
+                                  <div className="font-semibold text-white">{d.donorName}</div>
+                                  <div className="text-[10px] text-slate-400 font-mono">{d.donorPhone || 'Pa gen nimewo'}</div>
+                                  {d.paymentMethod && (
+                                    <div className="text-[9px] text-yellow-300 font-mono mt-0.5">{d.paymentMethod}</div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="font-medium text-white">{d.musicTitle}</div>
+                                  <div className="text-[10px] text-yellow-400">{d.artistName}</div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  {d.proofUrl ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setProofModalInfo({
+                                          url: d.proofUrl,
+                                          title: `Prèv Sipò Valide - $${d.amount} ${d.currency || 'USD'} (~${Math.round(toHtg(d.amount)).toLocaleString()} HTG)`,
+                                          donorOrArtistName: d.donorName,
+                                          phone: d.donorPhone || 'Pa gen nimewo',
+                                          amount: `$${d.amount} ${d.currency || 'USD'} (~${Math.round(toHtg(d.amount)).toLocaleString()} HTG)`,
+                                          musicTitle: `${d.musicTitle} (${d.artistName})`,
+                                          date: d.createdAt,
+                                          type: 'support'
+                                        });
+                                        setProofZoom(1);
+                                      }}
+                                      className="flex items-center gap-1.5 p-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.1] border border-white/[0.08] transition-colors group"
+                                      title="Klike pou wè foto prèv tranzaksyon sa a"
+                                    >
+                                      <img
+                                        src={d.proofUrl}
+                                        alt="Prèv"
+                                        className="w-8 h-8 rounded-md object-cover border border-yellow-400/30"
+                                      />
+                                      <span className="text-[11px] font-semibold text-yellow-400 group-hover:underline pr-1">
+                                        Wè Prèv
+                                      </span>
+                                    </button>
+                                  ) : (
+                                    <span className="text-slate-600 text-[11px]">Pa gen foto</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {renderDualAmount(d.amount, { colorUsd: 'font-mono font-bold text-yellow-400 text-xs', colorHtg: 'text-yellow-400/80' })}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {renderDualAmount(artistPart, { colorUsd: 'font-mono font-bold text-emerald-400 text-xs', colorHtg: 'text-emerald-400/80', boldHtg: true })}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {renderDualAmount(platformPart, { colorUsd: 'font-mono font-bold text-blue-400 text-xs', colorHtg: 'text-blue-400/80' })}
+                                </td>
+                                <td className="px-4 py-3 text-slate-400 text-[10px] font-mono">
+                                  <div>{d.createdAt}</div>
+                                  <div className="text-slate-500">#{d.id.slice(-6)}</div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ================= SPACE 3: ESPAS REFIZE (REJECTED) ================= */}
+            {(validationStatusFilter === 'rejected' || validationStatusFilter === 'all') && (
+              <div className="space-y-6">
+                {validationStatusFilter === 'all' && (
+                  <div className="flex items-center gap-2 text-red-400 font-black text-sm uppercase tracking-wider pt-4 border-t border-white/[0.08]">
+                    <XCircle className="w-4 h-4 text-red-400" />
+                    <span>Espas 3: Dosye ki Refize ({totalRejectedAll})</span>
+                  </div>
+                )}
+
+                {/* Rejected Artists */}
+                {(validationCategoryFilter === 'all' || validationCategoryFilter === 'artists') && (
+                  <div className="bg-[#0a0f1d]/90 border border-red-500/20 rounded-3xl p-5 sm:p-6 backdrop-blur-xl space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/[0.08]">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-red-500/20 border border-red-500/30 flex items-center justify-center text-red-400">
+                          <UserX className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-base font-bold text-white flex items-center gap-2">
+                            <span>Enskripsyon Atis ki Refize</span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30 font-mono font-bold">
+                              {filteredRejectedArtists.length} refize
+                            </span>
+                          </h4>
+                          <p className="text-xs text-slate-400">
+                            Atis ki pa t satisfè kondisyon yo oswa ki te voye yon move prèv peman.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {filteredRejectedArtists.length === 0 ? (
+                      <div className="py-6 text-center text-xs text-slate-500 bg-[#05070a]/60 rounded-2xl border border-white/[0.04]">
+                        {validationSearchQuery ? 'Pa gen okenn atis refize ki koresponn ak rechèch la.' : 'Pa gen okenn enskripsyon atis ki refize kounye a.'}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {filteredRejectedArtists.map((art) => (
+                          <div
+                            key={art.id}
+                            className="bg-[#05070a]/90 border border-red-500/30 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 backdrop-blur-md"
+                          >
+                            <div className="flex items-start sm:items-center gap-3.5">
+                              {art.registrationProofUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setProofModalInfo({
+                                      url: art.registrationProofUrl!,
+                                      title: `Prèv Enskripsyon Refize - ${art.stageName}`,
+                                      donorOrArtistName: `${art.stageName} (${art.name})`,
+                                      phone: art.phone || 'N/A',
+                                      amount: `$4.99 USD`,
+                                      musicTitle: `Enskripsyon Atis (Refize)`,
+                                      date: art.registrationDate,
+                                      type: 'artist_fee'
+                                    });
+                                    setProofZoom(1);
+                                  }}
+                                  className="w-16 h-16 rounded-xl overflow-hidden border border-red-500/40 bg-black/60 shrink-0"
+                                >
+                                  <img
+                                    src={art.registrationProofUrl}
+                                    alt={art.stageName}
+                                    className="w-full h-full object-cover opacity-70"
+                                  />
+                                </button>
+                              ) : (
+                                <div className="w-16 h-16 rounded-xl border border-white/[0.08] bg-white/[0.02] flex items-center justify-center text-[9px] text-slate-500 shrink-0">
+                                  San Prèv
+                                </div>
+                              )}
+
+                              <div className="space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-bold text-white text-sm line-through text-slate-400">{art.stageName}</span>
+                                  <span className="text-xs text-slate-500">({art.name})</span>
+                                  <span className="text-[10px] text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20 font-bold">
+                                    Refize
+                                  </span>
+                                </div>
+                                <div className="text-xs text-slate-400">
+                                  <span>📞 Tel: {art.phone || 'N/A'}</span> • <span>✉️ {art.email}</span>
+                                </div>
+                                {art.rejectionReason && (
+                                  <p className="text-xs text-red-300/90 bg-red-950/30 border border-red-500/20 px-2.5 py-1 rounded-lg">
+                                    <strong>Rezon:</strong> {art.rejectionReason}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                              <button
+                                type="button"
+                                onClick={() => handleOptimisticValidateArtist(art.id, true)}
+                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600/80 hover:bg-emerald-600 text-white flex items-center gap-1 transition-all"
+                                title="Rekonsidere epi valide atis sa a kounye a"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Re-Valide Atis</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Rejected Donations */}
+                {(validationCategoryFilter === 'all' || validationCategoryFilter === 'donations') && (
+                  <div className="bg-[#0a0f1d]/90 border border-red-500/20 rounded-3xl p-5 sm:p-6 backdrop-blur-xl space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/[0.08]">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-red-500/20 border border-red-500/30 flex items-center justify-center text-red-400">
+                          <XCircle className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-base font-bold text-white flex items-center gap-2">
+                            <span>Sipò Mizik ki Refize</span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30 font-mono font-bold">
+                              {filteredRejectedDonations.length} refize
+                            </span>
+                          </h4>
+                          <p className="text-xs text-slate-400">
+                            Donasyon ki pa t valide akòz prèv pa kòrèk oswa tranzaksyon anile.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {filteredRejectedDonations.length === 0 ? (
+                      <div className="py-6 text-center text-xs text-slate-500 bg-[#05070a]/60 rounded-2xl border border-white/[0.04]">
+                        {validationSearchQuery ? 'Pa gen okenn sipò refize ki koresponn ak rechèch la.' : 'Pa gen okenn sipò mizik ki refize kounye a.'}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {filteredRejectedDonations.map((don) => (
+                          <div
+                            key={don.id}
+                            className="bg-[#05070a]/90 border border-red-500/30 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 backdrop-blur-md"
+                          >
+                            <div className="flex items-start sm:items-center gap-3.5">
+                              {don.proofUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setProofModalInfo({
+                                      url: don.proofUrl,
+                                      title: `Prèv Sipò Refize - $${don.amount}`,
+                                      donorOrArtistName: don.donorName,
+                                      phone: don.donorPhone || 'Pa gen nimewo',
+                                      amount: `$${don.amount} ${don.currency || 'USD'}`,
+                                      musicTitle: `${don.musicTitle} (${don.artistName})`,
+                                      date: don.createdAt,
+                                      type: 'support'
+                                    });
+                                    setProofZoom(1);
+                                  }}
+                                  className="w-16 h-16 rounded-xl overflow-hidden border border-red-500/40 bg-black/60 shrink-0"
+                                >
+                                  <img
+                                    src={don.proofUrl}
+                                    alt={don.donorName}
+                                    className="w-full h-full object-cover opacity-70"
+                                  />
+                                </button>
+                              ) : (
+                                <div className="w-16 h-16 rounded-xl border border-white/[0.08] bg-white/[0.02] flex items-center justify-center text-[9px] text-slate-500 shrink-0">
+                                  San Prèv
+                                </div>
+                              )}
+
+                              <div className="space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-bold text-white text-sm line-through text-slate-400">{don.donorName}</span>
+                                  <span className="text-xs text-red-300 font-mono font-bold bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">
+                                    ${don.amount.toFixed(2)} USD
+                                  </span>
+                                  <span className="text-[10px] text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20 font-bold">
+                                    Refize
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-400">
+                                  Pou: {don.musicTitle} ({don.artistName}) • 📞 {don.donorPhone || 'N/A'}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                              <button
+                                type="button"
+                                onClick={() => handleOptimisticValidateDonation(don.id, true)}
+                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600/80 hover:bg-emerald-600 text-white flex items-center gap-1 transition-all"
+                                title="Rekonsidere epi valide don sa a kounye a"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Re-Valide Don</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        </div>
-      );
-    })()}
+        );
+      })()}
 
       {/* VIEW 3: VALIDATION & INTEGRATION DEMANDS FOR ARTISTS */}
       {activeTab === 'artists_pending' && (() => {
@@ -3110,7 +3769,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       type="button"
                       onClick={() => {
                         if (window.confirm(`Èske w vle valide tout ${pendingList.length} kont atis ki an atant yo kounye a?`)) {
-                          pendingList.forEach(p => onValidateArtist(p.id, true));
+                          pendingList.forEach(p => handleOptimisticValidateArtist(p.id, true));
                         }
                       }}
                       className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950/50 flex items-center gap-1.5 transition-all active:scale-95"
@@ -3527,6 +4186,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 📅 {art.registrationDate}
                               </span>
                             </div>
+
+                            {/* Rejection reason banner if rejected */}
+                            {isRejected && (art.registrationRejectionReason || art.rejectionReason) && (
+                              <div className="bg-red-950/40 border border-red-500/30 rounded-xl p-2.5 text-xs text-red-200 flex items-start gap-2 mt-1">
+                                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                                <div>
+                                  <strong className="text-red-300">Rezon Refi: </strong>
+                                  <span>{art.registrationRejectionReason || art.rejectionReason}</span>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -3570,7 +4240,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           {!isActive && (
                             <button
                               type="button"
-                              onClick={() => onValidateArtist(art.id, true)}
+                              onClick={() => handleOptimisticValidateArtist(art.id, true)}
                               className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shadow-lg shadow-emerald-950/40 transition-all active:scale-95"
                             >
                               <Check className="w-3.5 h-3.5" />
@@ -4395,6 +5065,46 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                         {/* Action Buttons */}
                         <div className="flex flex-wrap items-center gap-2 shrink-0 self-end xl:self-center">
+                          {/* Pending Artist Quick Validate / Reject Buttons */}
+                          {isPending && (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleOptimisticValidateArtist(art.id, true)}
+                                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shadow-lg shadow-emerald-950/40 active:scale-95 transition-all"
+                                title="Valide kont atis sa a ($4.99)"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Valide Atis</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setArtistRejectTarget(art);
+                                  setArtistRejectReason('Foto prèv transfè a pa klè oswa nimewo referans lan pa kowenside.');
+                                }}
+                                className="px-3 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white flex items-center gap-1.5 transition-all active:scale-95"
+                                title="Refize demand atis sa a"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                <span>Refize</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Rejected Artist Quick Re-Validate Button */}
+                          {isRejected && (
+                            <button
+                              type="button"
+                              onClick={() => handleOptimisticValidateArtist(art.id, true)}
+                              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shadow-lg shadow-emerald-950/40 active:scale-95 transition-all"
+                              title="Re-valide demand atis sa a"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Re-Valide</span>
+                            </button>
+                          )}
+
                           {/* If Suspended -> Reactivate Button */}
                           {isSuspended ? (
                             <button
@@ -4411,8 +5121,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <CheckCircle className="w-3.5 h-3.5" />
                               <span>Leve Sispansyon (Re-aktive)</span>
                             </button>
-                          ) : (
-                            /* If Active/Pending -> Suspend Button */
+                          ) : !isPending && !isRejected ? (
+                            /* If Active -> Suspend Button */
                             <button
                               type="button"
                               onClick={() => {
@@ -4426,7 +5136,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <Ban className="w-3.5 h-3.5 text-amber-400" />
                               <span>Mete an Sispansyon</span>
                             </button>
-                          )}
+                          ) : null}
 
                           {/* Delete Artist Button */}
                           <button
@@ -6773,7 +7483,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 type="button"
                 onClick={() => {
                   if (artistRejectTarget) {
-                    onValidateArtist(artistRejectTarget.id, false, artistRejectReason.trim() || undefined);
+                    handleOptimisticValidateArtist(artistRejectTarget.id, false, artistRejectReason.trim() || undefined);
                     setArtistRejectTarget(null);
                   }
                 }}
@@ -8135,7 +8845,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      onValidateArtist(selectedArtistDossier.id, true);
+                      handleOptimisticValidateArtist(selectedArtistDossier.id, true);
                       setSelectedArtistDossier(null);
                     }}
                     className="px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-lg shadow-emerald-950/40 flex items-center gap-1.5"

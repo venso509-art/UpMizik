@@ -876,9 +876,11 @@ export const StorageService = {
     const list = StorageService.getArtists();
     let validatedArtist: ArtistUser | null = null;
     let generatedEmail: ArtistInboxMessage | null = null;
+    let found = false;
 
     const updated = list.map(a => {
       if (a.id === artistId) {
+        found = true;
         const newStatus = accept ? ('active' as const) : ('rejected' as const);
         validatedArtist = {
           ...a,
@@ -889,6 +891,19 @@ export const StorageService = {
       }
       return a;
     });
+
+    if (!found) {
+      const initMatch = INITIAL_ARTISTS.find(ia => ia.id === artistId);
+      if (initMatch) {
+        const newStatus = accept ? ('active' as const) : ('rejected' as const);
+        validatedArtist = {
+          ...initMatch,
+          status: newStatus,
+          registrationRejectionReason: !accept ? (reason || 'Foto prèv transfè a pa klè oswa referans lan pa koresponn. Tanpri telechaje yon nouvo prèv.') : undefined
+        };
+        updated.push(validatedArtist);
+      }
+    }
     setStoredData(KEYS.ARTISTS, updated);
 
     // If currently logged-in artist is this artist, update session too
@@ -1279,15 +1294,26 @@ export const StorageService = {
   } => {
     const donations = StorageService.getRawStoredDonations();
     let validatedDonation: DonationItem | null = null;
+    let found = false;
 
     const updatedDonations = donations.map(d => {
       if (d.id === donationId) {
+        found = true;
         const status = accept ? ('validated' as const) : ('rejected' as const);
         validatedDonation = { ...d, status };
         return validatedDonation;
       }
       return d;
     });
+
+    if (!found) {
+      const initMatch = INITIAL_DONATIONS.find(d => d.id === donationId);
+      if (initMatch) {
+        const status = accept ? ('validated' as const) : ('rejected' as const);
+        validatedDonation = { ...initMatch, status };
+        updatedDonations.push(validatedDonation);
+      }
+    }
     StorageService.saveDonations(updatedDonations);
 
     let generatedEmail: ArtistInboxMessage | null = null;
