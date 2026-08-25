@@ -268,14 +268,14 @@ export const ArtistAuthModal: React.FC<ArtistAuthModalProps> = ({
             email: cleanEmail,
             artistId: artistByEmail.id,
             artistName: artistByEmail.stageName || artistByEmail.name,
-            reason: `Kòd PIN oswa modpas sekrè a enkòrèk pou atis sa a (${artistByEmail.stageName || artistByEmail.name}). Tantativ ${attemptRes.failedAttempts}/5.`,
+            reason: `Kòd PIN oswa modpas sekrè a enkòrèk pou atis sa a (${artistByEmail.stageName || artistByEmail.name}). Tantativ ${attemptRes.failedAttempts}/3.`,
             status: 'error'
           });
 
           if (attemptRes.isLocked) {
-            setErrorMsg(`Kont sa a bloke tanporèman pou ${attemptRes.remainingMinutes} minit akòz twòp tantativ koneksyon echwe (Fòs brit). Yo voye yon notifikasyon sekirite bay Administratè a.`);
+            setErrorMsg(`Kont sa a bloke tanporèman pou ${attemptRes.remainingMinutes} minit akòz plis pase 3 tantativ koneksyon echwe (Rate Limiting). Yo voye yon notifikasyon imèl sekirite bay Administratè a.`);
           } else {
-            const warnText = attemptRes.remainingAttempts <= 2 ? ` (Atansyon: ou rete sèlman ${attemptRes.remainingAttempts} tantativ anvan kont lan bloke tanporèman pou sekirite).` : '';
+            const warnText = attemptRes.remainingAttempts === 1 ? ` (Atansyon: ou rete sèlman 1 dènye tantativ anvan kont lan bloke epi voye alèt bay Admin).` : '';
             setErrorMsg(`Imèl ou a oubyen kòd ou a pa kòrèk, tanpri verifye.${warnText}`);
           }
           return;
@@ -287,14 +287,14 @@ export const ArtistAuthModal: React.FC<ArtistAuthModalProps> = ({
       StorageService.addActivityLog({
         eventType: 'echec_connexion_identifiants',
         email: cleanEmail,
-        reason: `Imèl oswa kontak '${cleanEmail}' pa jwenn nan baz done atis la. Tantativ ${attemptRes.failedAttempts}/5.`,
+        reason: `Imèl oswa kontak '${cleanEmail}' pa jwenn nan baz done atis la. Tantativ ${attemptRes.failedAttempts}/3.`,
         status: 'error'
       });
 
       if (attemptRes.isLocked) {
-        setErrorMsg(`Kont sa a bloke tanporèman pou ${attemptRes.remainingMinutes} minit akòz twòp tantativ koneksyon echwe. Yo voye yon notifikasyon sekirite bay Administratè a.`);
+        setErrorMsg(`Kont sa a bloke tanporèman pou ${attemptRes.remainingMinutes} minit akòz plis pase 3 tantativ koneksyon echwe (Rate Limiting). Yo voye yon notifikasyon imèl sekirite bay Administratè a.`);
       } else {
-        const warnText = attemptRes.remainingAttempts <= 2 ? ` (Atansyon: ou rete sèlman ${attemptRes.remainingAttempts} tantativ anvan kont lan bloke tanporèman pou sekirite).` : '';
+        const warnText = attemptRes.remainingAttempts === 1 ? ` (Atansyon: ou rete sèlman 1 dènye tantativ anvan kont lan bloke epi voye alèt bay Admin).` : '';
         setErrorMsg(`Imèl ou a oubyen kòd ou a pa kòrèk, tanpri verifye.${warnText}`);
       }
     }, 500);

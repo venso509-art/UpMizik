@@ -22,8 +22,9 @@ if (session_status() === PHP_SESSION_NONE) {
  * Konfigirasyon Sekirite & Rate Limiting
  */
 define('AUTH_SECRET_KEY', getenv('AUTH_SECRET_KEY') ?: 'UpMizik_Secret_Auth_Token_Key_2026_509#@!');
-define('AUTH_MAX_FAILED_ATTEMPTS', 5);          // Kantite tantativ echwe maksimòm anvan blokaj (5 tantativ)
-define('AUTH_RATE_LIMIT_WINDOW', 900);          // Fenèt tan pou kalkil tantativ yo (15 minit = 900 segond)
+define('AUTH_ALERT_THRESHOLD', 3);              // Kantite tantativ echwe pou deklanche alèt imèl admin (> 3 tantativ)
+define('AUTH_MAX_FAILED_ATTEMPTS', 3);          // Kantite tantativ echwe maksimòm anvan blokaj (3 tantativ)
+define('AUTH_RATE_LIMIT_WINDOW', 900);          // Fenèt tan kout pou kalkil tantativ yo (15 minit = 900 segond)
 define('AUTH_LOCKOUT_DURATION', 900);           // Dire blokaj tanporè kont lan (15 minit = 900 segond)
 define('ADMIN_DEFAULT_EMAIL', 'upmizik.haiti@gmail.com'); // Imèl notifikasyon sekirite admin pa defo
 
@@ -544,7 +545,54 @@ function clearArtistLoginAttempts(string $identifier, string $ip, ?PDO $db = nul
 }
 
 /**
- * Voye yon notifikasyon imèl sekirite an tan reyèl bay Administratè a lè yo detekte yon atak Fòs Brit (Brute Force)
+ * Fonksyon pou voye yon notifikasyon imèl bay administratè a chak fwa sistèm nan
+ * detekte plis pase 3 tantativ koneksyon echwe pou menm imèl atis la nan yon espas tan kout (Rate Limiting).
+ *
+ * @param string $artistEmail Imèl atis ki sibi tantativ echwe yo
+ * @param int $failedAttempts Kantite tantativ echwe ki fèt (plis pase 3 tantativ)
+ * @param string|null $ip Adrès IP kliyan an / atakè a (opsyonèl)
+ * @param string|null $userAgent Aparèy / Navigatè kliyan an (opsyonèl)
+ * @param array|null $artistInfo Done atis la si li egziste nan baz done a (opsyonèl)
+ * @param int $lockoutMinutes Dire blokaj tanporè a an minit (pa defo 15 minit)
+ * @param PDO|null $db Koneksyon PDO opsyonèl
+ * @return bool Vrè si notifikasyon an te voye avèk siksè
+ */
+function notifyAdminOnFailedLoginRateLimit(
+    string $artistEmail,
+    int $failedAttempts,
+    ?string $ip = null,
+    ?string $userAgent = null,
+    ?array $artistInfo = null,
+    int $lockoutMinutes = 15,
+    ?PDO $db = null
+): bool {
+    $clientIp = $ip ?: getSecurityClientIp();
+    $clientUa = $userAgent ?: ($_SERVER['HTTP_USER_AGENT'] ?? 'Unknown UserAgent');
+
+    // Chèche done atis la si yo pa t bay li
+    if (!$artistInfo && $db) {
+        try {
+            $stmt = $db->prepare("SELECT * FROM artistes WHERE LOWER(email) = LOWER(?) LIMIT 1");
+            $stmt->execute([trim($artistEmail)]);
+            $artistInfo = $stmt->fetch() ?: null;
+        } catch (Exception $e) {
+            // Ignore failure
+        }
+    }
+
+    return sendAdminRateLimitAlertEmail(
+        $artistEmail,
+        $artistInfo,
+        $failedAttempts,
+        $clientIp,
+        $clientUa,
+        $lockoutMinutes,
+        $db
+    );
+}
+
+/**
+ * Voye yon notifikasyon imèl sekirite an tan reyèl bay Administratè a lè yo detekte plis pase 3 tantativ koneksyon echwe (Rate Limiting / Fòs Brit)
  *
  * @param string $targetEmail Imèl atis ki sibi tantativ yo
  * @param array|null $artistInfo Enfòmasyon atis la (si li egziste nan baz done a)
@@ -555,7 +603,7 @@ function clearArtistLoginAttempts(string $identifier, string $ip, ?PDO $db = nul
  * @param PDO|null $db Koneksyon PDO
  * @return bool Vrè si imèl la te voye avèk siksè
  */
-function sendAdminBruteForceAlertEmail(
+function sendAdminRateLimitAlertEmail(
     string $targetEmail,
     ?array $artistInfo,
     int $attemptCount,
@@ -730,6 +778,29 @@ function sendAdminBruteForceAlertEmail(
     }
 
     return $mailSent;
+}
+
+/**
+ * Alias pou sendAdminRateLimitAlertEmail (Konpatibilite)
+ */
+function sendAdminBruteForceAlertEmail(
+    string $targetEmail,
+    ?array $artistInfo,
+    int $attemptCount,
+    string $ip,
+    string $userAgent,
+    int $lockoutMinutes,
+    ?PDO $db = null
+): bool {
+    return sendAdminRateLimitAlertEmail(
+        $targetEmail,
+        $artistInfo,
+        $attemptCount,
+        $ip,
+        $userAgent,
+        $lockoutMinutes,
+        $db
+    );
 }
 
 /**

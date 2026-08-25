@@ -1880,14 +1880,14 @@ export const StorageService = {
     return false;
   },
 
-  // Artist Login Rate Limiting (Max 5 failed attempts, 15 min lockout + admin notification)
+  // Artist Login Rate Limiting (Max 3 failed attempts, 15 min lockout + admin notification)
   getArtistRateLimitState: (identifier: string): { isLocked: boolean; remainingMinutes: number; remainingAttempts: number; failedAttempts: number } => {
     const cleanId = identifier.trim().toLowerCase();
-    if (!cleanId) return { isLocked: false, remainingMinutes: 0, remainingAttempts: 5, failedAttempts: 0 };
+    if (!cleanId) return { isLocked: false, remainingMinutes: 0, remainingAttempts: 3, failedAttempts: 0 };
     
     const records = getStoredData<Record<string, { failedCount: number; lockoutUntil: number | null; lastAttempt: number }>>(KEYS.ARTIST_RATE_LIMITS, {});
     const item = records[cleanId];
-    if (!item) return { isLocked: false, remainingMinutes: 0, remainingAttempts: 5, failedAttempts: 0 };
+    if (!item) return { isLocked: false, remainingMinutes: 0, remainingAttempts: 3, failedAttempts: 0 };
 
     const now = Date.now();
     // Check if lockout has expired
@@ -1901,10 +1901,10 @@ export const StorageService = {
     if (now - item.lastAttempt > 15 * 60 * 1000) {
       delete records[cleanId];
       setStoredData(KEYS.ARTIST_RATE_LIMITS, records);
-      return { isLocked: false, remainingMinutes: 0, remainingAttempts: 5, failedAttempts: 0 };
+      return { isLocked: false, remainingMinutes: 0, remainingAttempts: 3, failedAttempts: 0 };
     }
 
-    const remainingAttempts = Math.max(0, 5 - item.failedCount);
+    const remainingAttempts = Math.max(0, 3 - item.failedCount);
     return { isLocked: false, remainingMinutes: 0, remainingAttempts, failedAttempts: item.failedCount };
   },
 
@@ -1913,7 +1913,7 @@ export const StorageService = {
     artistInfo?: { id?: string; name?: string; stageName?: string; email?: string }
   ): { isLocked: boolean; remainingMinutes: number; remainingAttempts: number; failedAttempts: number } => {
     const cleanId = identifier.trim().toLowerCase();
-    if (!cleanId) return { isLocked: false, remainingMinutes: 0, remainingAttempts: 4, failedAttempts: 1 };
+    if (!cleanId) return { isLocked: false, remainingMinutes: 0, remainingAttempts: 2, failedAttempts: 1 };
 
     const records = getStoredData<Record<string, { failedCount: number; lockoutUntil: number | null; lastAttempt: number; alerted?: boolean }>>(KEYS.ARTIST_RATE_LIMITS, {});
     const now = Date.now();
@@ -1929,7 +1929,7 @@ export const StorageService = {
     item.failedCount += 1;
     item.lastAttempt = now;
 
-    if (item.failedCount >= 5) {
+    if (item.failedCount >= 3) {
       item.lockoutUntil = now + 15 * 60 * 1000;
       const remainingMin = 15;
       
@@ -1942,7 +1942,7 @@ export const StorageService = {
           email: cleanId,
           artistId: artistInfo?.id,
           artistName: displayName,
-          reason: `ALÈT SEKIRITE (Brute Force): Yo detekte 5 tantativ koneksyon echwe repete sou kont atis '${displayName}'. Kont lan bloke tanporèman pou 15 minit epi yon notifikasyon sekirite voye bay Admin (upmizik.haiti@gmail.com).`,
+          reason: `ALÈT SEKIRITE (Rate Limiting / Fòs Brit): Yo detekte plis pase 3 tantativ koneksyon echwe repete (${item.failedCount} tantativ) sou kont atis '${displayName}'. Kont lan bloke tanporèman pou 15 minit epi yon notifikasyon sekirite voye bay Admin (upmizik.haiti@gmail.com).`,
           status: 'error'
         });
       }
@@ -1954,7 +1954,7 @@ export const StorageService = {
 
     records[cleanId] = item;
     setStoredData(KEYS.ARTIST_RATE_LIMITS, records);
-    const remaining = Math.max(0, 5 - item.failedCount);
+    const remaining = Math.max(0, 3 - item.failedCount);
     return { isLocked: false, remainingMinutes: 0, remainingAttempts: remaining, failedAttempts: item.failedCount };
   },
 
