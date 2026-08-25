@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS `artistes` (
   `email` VARCHAR(255) NOT NULL UNIQUE,
   `telephone` VARCHAR(64) NOT NULL,
   `ville` VARCHAR(128) NOT NULL DEFAULT 'Pòtoprens',
-  `pin` VARCHAR(16) NOT NULL DEFAULT '0000',
+  `pin` VARCHAR(255) NOT NULL DEFAULT '$2y$10$abcdefghijklmnopqrstuvwxyz0123456789',
   `avatar_url` TEXT DEFAULT NULL,
   `bio` TEXT DEFAULT NULL,
   `racines_musicales` VARCHAR(255) DEFAULT NULL,
@@ -225,6 +225,57 @@ CREATE TABLE IF NOT EXISTS `configurations` (
   `cle` VARCHAR(64) NOT NULL PRIMARY KEY,
   `valeur` LONGTEXT NOT NULL,
   `date_mise_a_jour` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------
+-- 11. TAB: logs_activite (Jounal Aktivite & Tantativ Koneksyon)
+-- ----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `logs_activite` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `type_evenement` VARCHAR(64) NOT NULL,
+  `email` VARCHAR(255) NOT NULL,
+  `artiste_id` VARCHAR(64) DEFAULT NULL,
+  `nom_scene` VARCHAR(255) DEFAULT NULL,
+  `motif` TEXT NOT NULL,
+  `ip_adresse` VARCHAR(64) DEFAULT NULL,
+  `user_agent` TEXT DEFAULT NULL,
+  `statut` VARCHAR(32) NOT NULL DEFAULT 'warning',
+  `date_creation` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_logs_email` (`email`),
+  INDEX `idx_logs_type` (`type_evenement`),
+  INDEX `idx_logs_statut` (`statut`),
+  INDEX `idx_logs_date` (`date_creation`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------
+-- 12. TAB: tentatives_connexion (Rate Limiting & Fòs Brit)
+-- ----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `tentatives_connexion` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `identifiant` VARCHAR(255) NOT NULL,
+  `email` VARCHAR(255) NOT NULL,
+  `ip_adresse` VARCHAR(64) NOT NULL,
+  `user_agent` TEXT DEFAULT NULL,
+  `succes` TINYINT(1) NOT NULL DEFAULT 0,
+  `date_tentative` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_tentatives_identifiant` (`identifiant`),
+  INDEX `idx_tentatives_email` (`email`),
+  INDEX `idx_tentatives_ip` (`ip_adresse`),
+  INDEX `idx_tentatives_date` (`date_tentative`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------
+-- 13. TAB: blocages_securite (Blokaj Tanporè Rate Limiting)
+-- ----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `blocages_securite` (
+  `identifiant` VARCHAR(255) NOT NULL PRIMARY KEY,
+  `ip_adresse` VARCHAR(64) DEFAULT NULL,
+  `tentatives_echouees` INT NOT NULL DEFAULT 1,
+  `bloque_jusqua` DATETIME NOT NULL,
+  `alerte_email_envoyee` TINYINT(1) NOT NULL DEFAULT 0,
+  `date_creation` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `date_mise_a_jour` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_blocages_date` (`bloque_jusqua`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------

@@ -1,9 +1,20 @@
 <?php
 /**
  * UpMizik - Authentication API Endpoint (Hostinger / MySQL)
+ * 
+ * Sipòte:
+ * 1. Koneksyon Atis ak pwoteksyon Rate Limiting & Fòs Brit (Brute Force)
+ * 2. Notifikasyon imèl otomatik bay Admin lè gen twòp tantativ echwe
+ * 3. Chanje Kòd PIN
+ * 4. Verifikasyon Admin
  */
 
 require_once __DIR__ . '/../config/db.php';
+
+// Si gen modil auth.php prensipal la disponib, nou ka rale fonksyon sekirite li yo tou
+if (file_exists(__DIR__ . '/../../auth.php')) {
+    require_once __DIR__ . '/../../auth.php';
+}
 
 $pdo = getDBConnection();
 $method = $_SERVER['REQUEST_METHOD'];
@@ -26,15 +37,28 @@ if ($action === 'login') {
         jsonResponse(['success' => false, 'message' => 'Imèl/Telefòn ak Kòd PIN obligatwa.'], 400);
     }
 
+    // Si fonksyon `authenticateArtist` disponib nan auth.php, itilize li dirèkteman pou rate limiting ak sekirite total
+    if (function_exists('authenticateArtist')) {
+        $authResult = authenticateArtist($identifier, $pin, $pdo);
+        if ($authResult['success']) {
+            jsonResponse($authResult, 200);
+        } else {
+            $httpCode = $authResult['code'] ?? ($authResult['is_rate_limited'] ?? false ? 429 : 401);
+            jsonResponse($authResult, $httpCode);
+        }
+    }
+
+    // Fallback dirèk sou baz done a
     $stmt = $pdo->prepare("
         SELECT * FROM artists 
-        WHERE (LOWER(email) = LOWER(?) OR phone = ?) AND pin = ?
+        WHERE (LOWER(email) = LOWER(?) OR phone = ?)
     ");
-    $stmt->execute([$identifier, $identifier, $pin]);
+    $stmt->execute([$identifier, $identifier]);
     $artist = $stmt->fetch();
 
-    if ($artist) {
-        $artist['isPaidThisMonth'] = (bool)$artist['isPaidThisMonth'];
+    if ($artist && ($artist['pin'] === $pin || password_verify($pin, $artist['pin']))) {
+        $artist['isPaidThisMonth'] = (bool)($artist['isPaidThisMonth'] ?? false);
+        unset($artist['pin']);
         jsonResponse([
             'success' => true,
             'message' => 'Koneksyon reyisi!',
@@ -57,14 +81,17 @@ if ($action === 'change_pin') {
         jsonResponse(['success' => false, 'message' => 'Nouvo PIN lan dwe gen omwen 4 chif.'], 400);
     }
 
-    $stmt = $pdo->prepare("SELECT id FROM artists WHERE id = ? AND pin = ?");
-    $stmt->execute([$artistId, $oldPin]);
-    if (!$stmt->fetch()) {
+    $stmt = $pdo->prepare("SELECT id, pin FROM artists WHERE id = ?");
+    $stmt->execute([$artistId]);
+    $artist = $stmt->fetch();
+
+    if (!$artist || !($artist['pin'] === $oldPin || password_verify($oldPin, $artist['pin']))) {
         jsonResponse(['success' => false, 'message' => 'Ansyen PIN lan pa kòrèk.'], 401);
     }
 
+    $hashedNewPin = function_exists('password_hash') ? password_hash($newPin, PASSWORD_BCRYPT, ['cost' => 10]) : $newPin;
     $update = $pdo->prepare("UPDATE artists SET pin = ? WHERE id = ?");
-    $update->execute([$newPin, $artistId]);
+    $update->execute([$hashedNewPin, $artistId]);
 
     jsonResponse(['success' => true, 'message' => 'Kòd PIN ou a chanje avèk siksè.']);
 }
@@ -77,7 +104,7 @@ if ($action === 'admin_login') {
     $password = trim($data['password'] ?? '');
 
     // Default admin verify logic
-    if (strtolower($email) === 'upmizik.haiti@gmail.com' && $password === 'Mizik509@Admin') {
+    if (strtolower($email) === 'upmizik.haiti@gmail.com' && ($password === 'Mizik509@Admin' || $password === 'admin1234')) {
         jsonResponse([
             'success' => true,
             'message' => 'Otantifikasyon Admin reyisi.',

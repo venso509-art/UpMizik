@@ -3,6 +3,7 @@
  * UpMizik - Enskripsyon Atis ak Prèv $4.99 (PHP / MySQL / Hostinger)
  */
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/auth.php';
 
 $message = '';
 $error = '';
@@ -49,12 +50,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($check->fetch()) {
                         $error = 'Imèl sa a deja anrejistre pou yon atis. Tanpri konekte.';
                     } else {
+                        $hashedPin = hashArtistPin($pin);
                         $stmt = $db->prepare("
                             INSERT INTO artistes (id, nom_scene, nom_complet, email, telephone, ville, pin, avatar_url, bio, statut, preuve_inscription_url)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'en_attente', ?)
                         ");
                         $stmt->execute([
-                            $artisteId, $nomScene, $nomComplet, $email, $telephone, $ville, $pin, $avatarUrl, $bio, $preuveUrl
+                            $artisteId, $nomScene, $nomComplet, $email, $telephone, $ville, $hashedPin, $avatarUrl, $bio, $preuveUrl
                         ]);
 
                         $message = 'Demann enskripsyon w lan voye avèk siksè! Pwofil ou an atant validasyon pa ekip UpMizik la. PIN koneksyon w se: ' . htmlspecialchars($pin);

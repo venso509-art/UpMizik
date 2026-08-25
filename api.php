@@ -18,6 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/auth.php';
 
 // Fonksyon pou voye repons JSON pwòp
 function sendResponse($success, $data = null, $message = '', $statusCode = 200) {
@@ -186,6 +187,7 @@ try {
 
             $id = $params['id'] ?? ('art_' . time() . '_' . bin2hex(random_bytes(3)));
             $statut = $params['statut'] ?? 'en_attente'; // en_attente pa defo jiskaske admin valide $4.99
+            $hashedPin = hashArtistPin($pin);
 
             $stmt = $db->prepare("
                 INSERT INTO artistes (
@@ -200,7 +202,7 @@ try {
             ");
 
             $stmt->execute([
-                $id, $nomScene, $nomComplet, $email, $telephone, $ville, $pin,
+                $id, $nomScene, $nomComplet, $email, $telephone, $ville, $hashedPin,
                 $avatarUrl, $bio, $statut, $preuveUrl,
                 $youtube, $instagram, $tiktok
             ]);
@@ -287,27 +289,141 @@ try {
         }
 
         /**
-         * [UPDATE] Koneksyon Atis ak PIN
+         * [AUTH] Koneksyon Atis ak PIN sekirize (password_verify & JWT/Session Token)
          * POST /api.php?action=login_artiste
          */
         case 'login_artiste': {
             $email = trim($params['email'] ?? '');
             $pin   = trim($params['pin'] ?? '');
 
-            if (empty($email) || empty($pin)) {
-                sendResponse(false, null, 'Tanpri antre imèl ak kòd PIN ou.', 400);
+            $result = authenticateArtist($email, $pin, $db);
+            if ($result['success']) {
+                sendResponse(true, [
+                    'token' => $result['token'],
+                    'artiste' => $result['artist']
+                ], $result['message'], 200);
+            } else {
+                $statusPayload = isset($result['statut']) ? ['statut' => $result['statut'], 'artiste' => $result['artist'] ?? null] : null;
+                sendResponse(false, $statusPayload, $result['message'], $result['code'] ?? 401);
+            }
+            break;
+        }
+
+        /**
+         * [AUTH] Verifikasyon Token/Sesyon pou artist_dashboard
+         * GET/POST /api.php?action=verify_artist_auth
+         */
+        case 'verify_artist_auth': {
+            $authedArtist = requireArtistAuth($db);
+            if ($authedArtist) {
+                sendResponse(true, [
+                    'authenticated' => true,
+                    'artiste' => $authedArtist
+                ], 'Sesyon atis la valid ak aktif.');
+            } else {
+                sendResponse(false, ['authenticated' => false], 'Ou pa otorize oubyen kont atis ou a pa aktif.', 401);
+            }
+            break;
+        }
+
+        /**
+         * [LOGS] Rekipere lis jounal aktivite & tantativ koneksyon yo
+         * GET /api.php?action=get_activity_logs
+         */
+        case 'get_activity_logs':
+        case 'list_logs_activite': {
+            if (!$db) {
+                sendResponse(true, [], 'Mòd offline: pa gen baz done konekte.');
             }
 
-            $stmt = $db->prepare("SELECT * FROM artistes WHERE email = ? AND pin = ?");
-            $stmt->execute([$email, $pin]);
-            $artiste = $stmt->fetch();
+            // Asire tab la egziste
+            $db->exec("
+                CREATE TABLE IF NOT EXISTS `logs_activite` (
+                  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+                  `type_evenement` VARCHAR(64) NOT NULL,
+                  `email` VARCHAR(255) NOT NULL,
+                  `artiste_id` VARCHAR(64) DEFAULT NULL,
+                  `nom_scene` VARCHAR(255) DEFAULT NULL,
+                  `motif` TEXT NOT NULL,
+                  `ip_adresse` VARCHAR(64) DEFAULT NULL,
+                  `user_agent` TEXT DEFAULT NULL,
+                  `statut` VARCHAR(32) NOT NULL DEFAULT 'warning',
+                  `date_creation` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  INDEX `idx_logs_email` (`email`),
+                  INDEX `idx_logs_type` (`type_evenement`),
+                  INDEX `idx_logs_statut` (`statut`),
+                  INDEX `idx_logs_date` (`date_creation`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            ");
 
-            if ($artiste) {
-                $_SESSION['artist_id'] = $artiste['id'];
-                $_SESSION['artist_name'] = $artiste['nom_scene'];
-                sendResponse(true, $artiste, 'Koneksyon reyisi.');
+            $typeFilter = $params['type'] ?? '';
+            $search = trim($params['search'] ?? '');
+            $limit = isset($params['limit']) ? intval($params['limit']) : 100;
+            $offset = isset($params['offset']) ? intval($params['offset']) : 0;
+
+            $whereClauses = [];
+            $queryParams = [];
+
+            if (!empty($typeFilter) && $typeFilter !== 'all') {
+                $whereClauses[] = "type_evenement = ?";
+                $queryParams[] = $typeFilter;
+            }
+
+            if (!empty($search)) {
+                $whereClauses[] = "(email LIKE ? OR nom_scene LIKE ? OR motif LIKE ? OR ip_adresse LIKE ?)";
+                $searchWildcard = "%{$search}%";
+                $queryParams[] = $searchWildcard;
+                $queryParams[] = $searchWildcard;
+                $queryParams[] = $searchWildcard;
+                $queryParams[] = $searchWildcard;
+            }
+
+            $whereSQL = !empty($whereClauses) ? "WHERE " . implode(" AND ", $whereClauses) : "";
+            $sql = "SELECT * FROM logs_activite {$whereSQL} ORDER BY date_creation DESC LIMIT {$limit} OFFSET {$offset}";
+
+            $stmt = $db->prepare($sql);
+            $stmt->execute($queryParams);
+            $logs = $stmt->fetchAll();
+
+            sendResponse(true, $logs, 'Jounal aktivite rekipere avèk siksè.');
+            break;
+        }
+
+        /**
+         * [LOGS] Anrejistre yon aktivite dirèkteman (depi frontend oswa sèvis)
+         * POST /api.php?action=log_activity
+         */
+        case 'log_activity': {
+            $eventType = $params['event_type'] ?? $params['eventType'] ?? 'autre';
+            $email = trim($params['email'] ?? '');
+            $artistId = $params['artist_id'] ?? $params['artistId'] ?? null;
+            $artistName = $params['artist_name'] ?? $params['artistName'] ?? null;
+            $reason = $params['reason'] ?? $params['motif'] ?? 'Tantativ aktivite';
+            $status = $params['status'] ?? $params['statut'] ?? 'warning';
+
+            $logged = logActivityEvent($eventType, $email, $artistId, $artistName, $reason, $status, $db);
+            sendResponse(true, ['logged' => $logged], 'Aktivite anrejistre avèk siksè.');
+            break;
+        }
+
+        /**
+         * [LOGS] Efase tout log oswa yon log espesifik
+         * POST /api.php?action=clear_activity_logs
+         */
+        case 'clear_activity_logs':
+        case 'delete_activity_log': {
+            if (!$db) {
+                sendResponse(true, null, 'Mòd offline.');
+            }
+
+            $logId = $params['id'] ?? $params['log_id'] ?? null;
+            if (!empty($logId)) {
+                $stmt = $db->prepare("DELETE FROM logs_activite WHERE id = ?");
+                $stmt->execute([$logId]);
+                sendResponse(true, null, 'Log efase avèk siksè.');
             } else {
-                sendResponse(false, null, 'Imèl oswa kòd PIN enkòrèk.', 401);
+                $db->exec("TRUNCATE TABLE logs_activite");
+                sendResponse(true, null, 'Tout jounal aktivite yo te netwaye avèk siksè.');
             }
             break;
         }

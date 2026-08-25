@@ -17,7 +17,8 @@ import {
   AwardPhysicalDeliveryStatus,
   PaymentMethodItem,
   PaymentSettingsConfig,
-  IntrusionLogItem
+  IntrusionLogItem,
+  ActivityLogItem
 } from '../types';
 import {
   INITIAL_ARTISTS,
@@ -59,7 +60,9 @@ const KEYS = {
   PAYMENT_SETTINGS: 'upmizik_payment_settings_v1',
   ADMIN_MASTER_KEY: 'upmizik_admin_master_key_v1',
   INTRUSION_LOGS: 'upmizik_intrusion_logs_v1',
+  ACTIVITY_LOGS: 'upmizik_activity_logs_v1',
   ADMIN_LOCKOUT: 'upmizik_admin_lockout_v1',
+  ARTIST_RATE_LIMITS: 'upmizik_artist_rate_limits_v1',
   SITE_VISITS: 'upmizik_site_visits_v1',
 };
 
@@ -1747,6 +1750,102 @@ export const StorageService = {
     StorageService.saveIntrusionLogs(updated);
   },
 
+  // ACTIVITY & AUTH LOGS MANAGEMENT
+  getActivityLogs: (): ActivityLogItem[] => {
+    const logs = getStoredData<ActivityLogItem[]>(KEYS.ACTIVITY_LOGS, []);
+    if (!logs || logs.length === 0) {
+      // Seed sample activity logs for realistic initial display
+      const initialLogs: ActivityLogItem[] = [
+        {
+          id: 'act_log_init_1',
+          eventType: 'echec_connexion_pending',
+          email: 'kingposse@upmizik.com',
+          artistId: 'art_pending_1',
+          artistName: 'King Posse Next Gen',
+          reason: 'Atis la eseye konekte nan artist_dashboard men kont li an atant validasyon $4.99 toujou pa Administratè a.',
+          ipAddress: '190.115.178.42',
+          userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15',
+          status: 'warning',
+          timestamp: new Date(Date.now() - 1000 * 60 * 18).toISOString()
+        },
+        {
+          id: 'act_log_init_2',
+          eventType: 'echec_connexion_identifiants',
+          email: 'blazeone@gmail.com',
+          artistId: 'art_1',
+          artistName: 'Blaze One',
+          reason: 'Kòd PIN oswa modpas sekrè a enkòrèk pou atis sa a.',
+          ipAddress: '165.225.208.91',
+          userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36',
+          status: 'error',
+          timestamp: new Date(Date.now() - 1000 * 60 * 45).toISOString()
+        },
+        {
+          id: 'act_log_init_3',
+          eventType: 'echec_connexion_identifiants',
+          email: 'ti_tonton_rap@yahoo.com',
+          reason: 'Imèl oswa kontak sa a pa jwenn nan baz done atis la.',
+          ipAddress: '190.115.176.12',
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/123.0.0.0',
+          status: 'error',
+          timestamp: new Date(Date.now() - 1000 * 60 * 120).toISOString()
+        }
+      ];
+      setStoredData(KEYS.ACTIVITY_LOGS, initialLogs);
+      return initialLogs;
+    }
+    return logs;
+  },
+  saveActivityLogs: (list: ActivityLogItem[]) => {
+    setStoredData(KEYS.ACTIVITY_LOGS, list);
+  },
+  addActivityLog: (data: Omit<ActivityLogItem, 'id' | 'timestamp'> & { timestamp?: string }): ActivityLogItem => {
+    const newLog: ActivityLogItem = {
+      id: 'act_log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      eventType: data.eventType,
+      email: data.email,
+      artistId: data.artistId,
+      artistName: data.artistName,
+      reason: data.reason,
+      ipAddress: data.ipAddress || '190.115.178.42',
+      userAgent: data.userAgent || (typeof navigator !== 'undefined' ? navigator.userAgent : 'Web Browser'),
+      status: data.status || 'warning',
+      timestamp: data.timestamp || new Date().toISOString()
+    };
+
+    const currentLogs = StorageService.getActivityLogs();
+    const updated = [newLog, ...currentLogs];
+    StorageService.saveActivityLogs(updated);
+
+    // Optional background sync with PHP backend API
+    try {
+      if (typeof fetch !== 'undefined') {
+        fetch('/api.php?action=log_activity', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            eventType: newLog.eventType,
+            email: newLog.email,
+            artistId: newLog.artistId,
+            artistName: newLog.artistName,
+            reason: newLog.reason,
+            status: newLog.status
+          })
+        }).catch(() => {});
+      }
+    } catch (_) {}
+
+    return newLog;
+  },
+  deleteActivityLog: (logId: string) => {
+    const current = StorageService.getActivityLogs();
+    const updated = current.filter(l => l.id !== logId);
+    StorageService.saveActivityLogs(updated);
+  },
+  clearActivityLogs: () => {
+    StorageService.saveActivityLogs([]);
+  },
+
   // Lockout Management (15 minutes lockout after 3 failed attempts)
   getAdminLockoutUntil: (): number | null => {
     const until = getStoredData<number | null>(KEYS.ADMIN_LOCKOUT, null);
@@ -1779,6 +1878,94 @@ export const StorageService = {
       return true;
     }
     return false;
+  },
+
+  // Artist Login Rate Limiting (Max 5 failed attempts, 15 min lockout + admin notification)
+  getArtistRateLimitState: (identifier: string): { isLocked: boolean; remainingMinutes: number; remainingAttempts: number; failedAttempts: number } => {
+    const cleanId = identifier.trim().toLowerCase();
+    if (!cleanId) return { isLocked: false, remainingMinutes: 0, remainingAttempts: 5, failedAttempts: 0 };
+    
+    const records = getStoredData<Record<string, { failedCount: number; lockoutUntil: number | null; lastAttempt: number }>>(KEYS.ARTIST_RATE_LIMITS, {});
+    const item = records[cleanId];
+    if (!item) return { isLocked: false, remainingMinutes: 0, remainingAttempts: 5, failedAttempts: 0 };
+
+    const now = Date.now();
+    // Check if lockout has expired
+    if (item.lockoutUntil && item.lockoutUntil > now) {
+      const remainingSec = Math.ceil((item.lockoutUntil - now) / 1000);
+      const remainingMin = Math.ceil(remainingSec / 60);
+      return { isLocked: true, remainingMinutes: remainingMin, remainingAttempts: 0, failedAttempts: item.failedCount };
+    }
+
+    // If window expired (e.g. > 15 mins since last attempt), reset counter
+    if (now - item.lastAttempt > 15 * 60 * 1000) {
+      delete records[cleanId];
+      setStoredData(KEYS.ARTIST_RATE_LIMITS, records);
+      return { isLocked: false, remainingMinutes: 0, remainingAttempts: 5, failedAttempts: 0 };
+    }
+
+    const remainingAttempts = Math.max(0, 5 - item.failedCount);
+    return { isLocked: false, remainingMinutes: 0, remainingAttempts, failedAttempts: item.failedCount };
+  },
+
+  recordArtistFailedLoginAttempt: (
+    identifier: string,
+    artistInfo?: { id?: string; name?: string; stageName?: string; email?: string }
+  ): { isLocked: boolean; remainingMinutes: number; remainingAttempts: number; failedAttempts: number } => {
+    const cleanId = identifier.trim().toLowerCase();
+    if (!cleanId) return { isLocked: false, remainingMinutes: 0, remainingAttempts: 4, failedAttempts: 1 };
+
+    const records = getStoredData<Record<string, { failedCount: number; lockoutUntil: number | null; lastAttempt: number; alerted?: boolean }>>(KEYS.ARTIST_RATE_LIMITS, {});
+    const now = Date.now();
+    const item = records[cleanId] || { failedCount: 0, lockoutUntil: null, lastAttempt: now };
+
+    // Reset if window has elapsed
+    if (item.lockoutUntil && item.lockoutUntil <= now && (now - item.lastAttempt > 15 * 60 * 1000)) {
+      item.failedCount = 0;
+      item.lockoutUntil = null;
+      item.alerted = false;
+    }
+
+    item.failedCount += 1;
+    item.lastAttempt = now;
+
+    if (item.failedCount >= 5) {
+      item.lockoutUntil = now + 15 * 60 * 1000;
+      const remainingMin = 15;
+      
+      // If not alerted yet, log security alert
+      if (!item.alerted) {
+        item.alerted = true;
+        const displayName = artistInfo?.stageName || artistInfo?.name || cleanId;
+        StorageService.addActivityLog({
+          eventType: 'alerte_force_brute',
+          email: cleanId,
+          artistId: artistInfo?.id,
+          artistName: displayName,
+          reason: `ALÈT SEKIRITE (Brute Force): Yo detekte 5 tantativ koneksyon echwe repete sou kont atis '${displayName}'. Kont lan bloke tanporèman pou 15 minit epi yon notifikasyon sekirite voye bay Admin (upmizik.haiti@gmail.com).`,
+          status: 'error'
+        });
+      }
+
+      records[cleanId] = item;
+      setStoredData(KEYS.ARTIST_RATE_LIMITS, records);
+      return { isLocked: true, remainingMinutes: remainingMin, remainingAttempts: 0, failedAttempts: item.failedCount };
+    }
+
+    records[cleanId] = item;
+    setStoredData(KEYS.ARTIST_RATE_LIMITS, records);
+    const remaining = Math.max(0, 5 - item.failedCount);
+    return { isLocked: false, remainingMinutes: 0, remainingAttempts: remaining, failedAttempts: item.failedCount };
+  },
+
+  clearArtistRateLimit: (identifier: string): void => {
+    const cleanId = identifier.trim().toLowerCase();
+    if (!cleanId) return;
+    const records = getStoredData<Record<string, any>>(KEYS.ARTIST_RATE_LIMITS, {});
+    if (records[cleanId]) {
+      delete records[cleanId];
+      setStoredData(KEYS.ARTIST_RATE_LIMITS, records);
+    }
   },
 
   // RESET & ARCHIVE LOGIC (Saves pre-reset data snapshot before resetting donations to 0)

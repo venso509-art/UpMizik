@@ -3,6 +3,7 @@
  * UpMizik - Paj Koneksyon (Atis & Admin)
  */
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/auth.php';
 
 $error = '';
 $message = '';
@@ -23,35 +24,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
-        if ($db) {
-            try {
-                // Tcheke tab artistes
-                $stmt = $db->prepare("SELECT * FROM artistes WHERE email = ? AND pin = ?");
-                $stmt->execute([$email, $pin]);
-                $artist = $stmt->fetch();
-
-                if ($artist) {
-                    $_SESSION['artist_id'] = $artist['id'];
-                    $_SESSION['artist_name'] = $artist['nom_scene'];
-                    $_SESSION['artist_status'] = $artist['statut'];
-                    header('Location: artistes.php?id=' . urlencode($artist['id']));
-                    exit;
-                } else {
-                    $error = 'Imèl oswa kòd PIN enkòrèk. Verifye enfòmasyon w yo.';
-                }
-            } catch (Exception $e) {
-                $error = 'Erè pandan verifikasyon: ' . $e->getMessage();
-            }
+        // Otantifikasyon Atis avèk auth.php ak password_verify()
+        $authResult = authenticateArtist($email, $pin, $db);
+        if ($authResult['success']) {
+            $artist = $authResult['artist'];
+            header('Location: artistes.php?id=' . urlencode($artist['id']));
+            exit;
         } else {
-            // Mode offline / demo
-            if ($pin === '1234' || $pin === '0000') {
-                $_SESSION['artist_id'] = 'art_demo';
-                $_SESSION['artist_name'] = 'Atis UpMizik';
-                header('Location: artistes.php');
-                exit;
-            } else {
-                $error = 'PIN enkòrèk pou sesyon lokal la.';
-            }
+            $error = $authResult['message'];
         }
     }
 }

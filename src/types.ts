@@ -289,6 +289,30 @@ export interface IntrusionLogItem {
   unlockToken?: string; // Secret unlock token sent to admin email to instantly lift lockout
 }
 
+export type ActivityEventType =
+  | 'echec_connexion_pending'
+  | 'echec_connexion_identifiants'
+  | 'echec_connexion_rate_limit'
+  | 'alerte_force_brute'
+  | 'echec_connexion_rejete'
+  | 'echec_connexion_suspendu'
+  | 'connexion_reussie'
+  | 'echec_serveur'
+  | 'autre';
+
+export interface ActivityLogItem {
+  id: string;
+  eventType: ActivityEventType;
+  email: string;
+  artistId?: string;
+  artistName?: string;
+  reason: string;
+  ipAddress?: string;
+  userAgent?: string;
+  status: 'warning' | 'error' | 'info' | 'success';
+  timestamp: string; // ISO date string
+}
+
 export type ActiveView = 'public' | 'social' | 'artist_dashboard' | 'admin_dashboard';
 
 export type ThemeMode = 'night' | 'light';

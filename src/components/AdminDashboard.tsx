@@ -92,7 +92,8 @@ import {
   Headphones,
   Volume2,
   Radio,
-  BellRing
+  BellRing,
+  Activity
 } from 'lucide-react';
 import { compressAndReadFile } from '../utils/imageUtils';
 import { IdbStorage } from '../utils/idbStorage';
@@ -105,6 +106,7 @@ import { MonthlyRevenueBarChart } from './MonthlyRevenueBarChart';
 import { PalmaresTrophiesDashboard } from './PalmaresTrophiesDashboard';
 import { PaymentSettingsTab } from './PaymentSettingsTab';
 import { AdminSecurityTab } from './AdminSecurityTab';
+import { AdminActivityLogsTab } from './AdminActivityLogsTab';
 import { calculateArtistAwards } from '../utils/awardsUtils';
 
 export const DEFAULT_HTG_EXCHANGE_RATE = 145.0; // 1 USD = 145 HTG (Taux de Référence Marché Haïti)
@@ -189,7 +191,7 @@ interface AdminDashboardProps {
   onLogoutAdmin: () => void;
 }
 
-type AdminTab = 'top3' | 'rpa' | 'pubs' | 'add_music' | 'validations' | 'artists_pending' | 'all_artists' | 'artist_payouts' | 'awards' | 'reports' | 'archive' | 'payment_settings' | 'security_logs';
+type AdminTab = 'top3' | 'rpa' | 'pubs' | 'add_music' | 'validations' | 'artists_pending' | 'all_artists' | 'artist_payouts' | 'awards' | 'reports' | 'archive' | 'payment_settings' | 'security_logs' | 'logs_activite';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   currentAdmin,
@@ -690,7 +692,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return effectiveArtists.map((art) => {
       // Find all tracks uploaded by this artist or featuring this artist
       const artistSongs = musicList.filter(
-        (m) => m.artistId === art.id || m.collab?.artistId === art.id
+        (m) =>
+          m.artistId === art.id ||
+          m.collab?.artistId === art.id ||
+          (m.artistName && art.stageName && m.artistName.trim().toLowerCase() === art.stageName.trim().toLowerCase()) ||
+          (m.collab?.artistName && art.stageName && m.collab.artistName.trim().toLowerCase() === art.stageName.trim().toLowerCase())
       );
 
       // Gross earned from tracks
@@ -1131,11 +1137,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     e.preventDefault();
     if (!musicTitle.trim()) return;
 
-    const artistObj = artists.find(a => a.id === musicArtistId);
+    const artistList = effectiveArtists.length > 0 ? effectiveArtists : artists;
+    const targetArtistId = musicArtistId || artistList[0]?.id || '';
+    const artistObj = artistList.find(a => a.id === targetArtistId) || artistList[0];
     const artistName = artistObj ? artistObj.stageName : 'Atis UpMizik';
+    const finalArtistId = artistObj ? artistObj.id : targetArtistId;
 
     const collabArtistObj = musicCollabArtistId
-      ? artists.find(a => a.id === musicCollabArtistId)
+      ? artistList.find(a => a.id === musicCollabArtistId)
       : null;
 
     const collabData = collabArtistObj
@@ -1159,7 +1168,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const songToSave: MusicItem = {
       id: editingSong ? editingSong.id : `music-${Date.now()}`,
       title: musicTitle.trim(),
-      artistId: musicArtistId,
+      artistId: finalArtistId,
       artistName: artistName,
       feat: musicFeat.trim() || undefined,
       collab: collabData,
@@ -2135,6 +2144,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </button>
 
         <button
+          id="admin-tab-activity-logs"
+          onClick={() => setActiveTab('logs_activite')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-2 transition-all ${
+            activeTab === 'logs_activite'
+              ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/25 font-black'
+              : 'bg-[#0a0f1d] text-blue-400 hover:bg-white/[0.08] border border-blue-500/30'
+          }`}
+          title="Jounal Aktivite, Tantativ Koneksyon Atis ak Erè"
+        >
+          <Activity className="w-4 h-4 text-blue-400" />
+          <span>Log Aktivite</span>
+          {StorageService.getActivityLogs().filter(l => l.status === 'error' || l.status === 'warning' || l.eventType === 'echec_connexion_pending').length > 0 && (
+            <span className="bg-amber-500 text-slate-950 text-[10px] px-1.5 py-0.2 rounded-full font-black">
+              {StorageService.getActivityLogs().filter(l => l.status === 'error' || l.status === 'warning' || l.eventType === 'echec_connexion_pending').length}
+            </span>
+          )}
+        </button>
+
+        <button
           id="admin-tab-archive"
           onClick={() => setActiveTab('archive')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-2 transition-all ${
@@ -2879,7 +2907,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
-                    value={validationSearchQuery}
+                    value={validationSearchQuery ?? ''}
                     onChange={(e) => setValidationSearchQuery(e.target.value)}
                     placeholder="Chèche non, tel, atis, mizik..."
                     className="w-full bg-[#05070a] border border-white/[0.1] rounded-xl pl-9 pr-8 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-yellow-400 transition-colors"
@@ -3952,7 +3980,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  value={artistValidationSearch}
+                  value={artistValidationSearch ?? ''}
                   onChange={(e) => setArtistValidationSearch(e.target.value)}
                   placeholder="Chèche non, vil, telefòn, estil..."
                   className="w-full bg-[#05070a] border border-white/[0.1] focus:border-yellow-400 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-slate-500 outline-none transition-all"
@@ -6021,11 +6049,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">Chwazi Atis Prensipal *</label>
                 <select
-                  value={musicArtistId ?? ''}
+                  value={musicArtistId || (effectiveArtists[0]?.id ?? artists[0]?.id ?? '')}
                   onChange={(e) => setMusicArtistId(e.target.value)}
                   className="w-full bg-[#05070a] border border-white/[0.12] rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-yellow-400 outline-none"
                 >
-                  {artists.map((a) => (
+                  {(effectiveArtists.length > 0 ? effectiveArtists : artists).map((a) => (
                     <option key={a.id} value={a.id}>{a.stageName} ({a.name})</option>
                   ))}
                 </select>
@@ -6131,8 +6159,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   className="w-full bg-[#05070a] border border-purple-500/30 rounded-xl px-3.5 py-2 text-xs text-purple-200 focus:border-purple-400 outline-none"
                 >
                   <option value="">-- Pa gen Kolaborasyon Lye --</option>
-                  {artists
-                    .filter((a) => a.id !== musicArtistId)
+                  {(effectiveArtists.length > 0 ? effectiveArtists : artists)
+                    .filter((a) => a.id !== (musicArtistId || effectiveArtists[0]?.id || artists[0]?.id))
                     .map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.stageName} ({a.city || 'Atis UpMizik'})
@@ -6161,8 +6189,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {/* CREDITS & SPLIT SHEETS (POUSANTAJ KOLABORASYON / KREDI) */}
             <SongCreditsEditor
               credits={musicCredits}
-              mainArtistName={artists.find((a) => a.id === musicArtistId)?.stageName || 'Atis Prensipal'}
-              registeredArtists={artists}
+              mainArtistName={(effectiveArtists.length > 0 ? effectiveArtists : artists).find((a) => a.id === (musicArtistId || effectiveArtists[0]?.id || artists[0]?.id))?.stageName || 'Atis Prensipal'}
+              registeredArtists={effectiveArtists.length > 0 ? effectiveArtists : artists}
               onAddCredit={handleAddMusicCredit}
               onRemoveCredit={handleRemoveMusicCredit}
               onUpdateCredit={handleUpdateMusicCredit}
@@ -6785,7 +6813,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer font-medium">
                         <input
                           type="checkbox"
-                          checked={pub.active}
+                          checked={Boolean(pub.active)}
                           onChange={(e) => {
                             const copy = [...tempPubs];
                             copy[idx].active = e.target.checked;
@@ -7193,6 +7221,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <AdminSecurityTab />
         </div>
+      )}
+
+      {/* VIEW: LOG AKTIVITE AK TANTATIV KONEKSYON ATIS */}
+      {activeTab === 'logs_activite' && (
+        <AdminActivityLogsTab
+          artists={effectiveArtists}
+          onValidateArtist={(artistId) => {
+            setActiveTab('artists_pending');
+            setArtistValidationFilter('pending');
+            const targetArtist = effectiveArtists.find(a => a.id === artistId);
+            if (targetArtist) {
+              setSelectedArtistDossier(targetArtist);
+            }
+          }}
+          onNavigateToTab={(tab) => setActiveTab(tab)}
+        />
       )}
 
       {/* PROOF IMAGE MODAL VIEWER */}
@@ -8529,7 +8573,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     type="number"
                     min="1"
                     step="5"
-                    value={customThresholdInput}
+                    value={customThresholdInput ?? ''}
                     onChange={(e) => setCustomThresholdInput(e.target.value)}
                     placeholder="Mete montan..."
                     className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl py-3 pl-8 pr-16 text-sm font-mono text-white outline-none"
@@ -8933,7 +8977,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="text"
                     required
-                    value={manualArtistStageName}
+                    value={manualArtistStageName ?? ''}
                     onChange={(e) => setManualArtistStageName(e.target.value)}
                     placeholder="Eg: King Rabo 509"
                     className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none"
@@ -8945,7 +8989,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="text"
                     required
-                    value={manualArtistName}
+                    value={manualArtistName ?? ''}
                     onChange={(e) => setManualArtistName(e.target.value)}
                     placeholder="Eg: Jean-Robert Dorval"
                     className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none"
@@ -8957,7 +9001,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="tel"
                     required
-                    value={manualArtistPhone}
+                    value={manualArtistPhone ?? ''}
                     onChange={(e) => setManualArtistPhone(e.target.value)}
                     placeholder="Eg: +509 37 28 9011"
                     className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono outline-none"
@@ -8969,7 +9013,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="email"
                     required
-                    value={manualArtistEmail}
+                    value={manualArtistEmail ?? ''}
                     onChange={(e) => setManualArtistEmail(e.target.value)}
                     placeholder="Eg: kingrabo509@gmail.com"
                     className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none"
@@ -8980,7 +9024,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="block text-xs font-bold text-slate-300 mb-1">Vil Rezidans</label>
                   <input
                     type="text"
-                    value={manualArtistCity}
+                    value={manualArtistCity ?? ''}
                     onChange={(e) => setManualArtistCity(e.target.value)}
                     placeholder="Eg: Kap-Ayisyen, Pòtoprens, Jakmèl..."
                     className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none"
@@ -8992,7 +9036,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="text"
                     maxLength={6}
-                    value={manualArtistPin}
+                    value={manualArtistPin ?? ''}
                     onChange={(e) => setManualArtistPin(e.target.value)}
                     placeholder="Eg: 1234"
                     className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono outline-none"
@@ -9035,7 +9079,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="block text-xs font-bold text-slate-300 mb-1">Foto Pwofil (URL oswa Telechaje)</label>
                   <input
                     type="url"
-                    value={manualArtistAvatar}
+                    value={manualArtistAvatar ?? ''}
                     onChange={(e) => setManualArtistAvatar(e.target.value)}
                     placeholder="https://images.unsplash.com/..."
                     className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs text-white outline-none mb-1.5"
@@ -9058,7 +9102,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="block text-xs font-bold text-slate-300 mb-1">Prèv Peman $4.99 (URL oswa Telechaje)</label>
                   <input
                     type="url"
-                    value={manualArtistProof}
+                    value={manualArtistProof ?? ''}
                     onChange={(e) => setManualArtistProof(e.target.value)}
                     placeholder="https://images.unsplash.com/..."
                     className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs text-white outline-none mb-1.5"
@@ -9084,7 +9128,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="block text-xs font-bold text-slate-300 mb-1">Rasin Mizikal & Estil</label>
                   <input
                     type="text"
-                    value={manualArtistRoots}
+                    value={manualArtistRoots ?? ''}
                     onChange={(e) => setManualArtistRoots(e.target.value)}
                     placeholder="Eg: Rasin, Vodou Jazz, Rap Kreyòl"
                     className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs text-white outline-none"
@@ -9095,7 +9139,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="block text-xs font-bold text-slate-300 mb-1">Enfliyans & Modèl</label>
                   <input
                     type="text"
-                    value={manualArtistInfluences}
+                    value={manualArtistInfluences ?? ''}
                     onChange={(e) => setManualArtistInfluences(e.target.value)}
                     placeholder="Eg: Boukman Eksperyans, RAM"
                     className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs text-white outline-none"
@@ -9107,7 +9151,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <label className="block text-xs font-bold text-slate-300 mb-1">Vizyon Atistik</label>
                 <input
                   type="text"
-                  value={manualArtistVision}
+                  value={manualArtistVision ?? ''}
                   onChange={(e) => setManualArtistVision(e.target.value)}
                   placeholder="Eg: Valorize ritm zansèt nou yo sou sèn entènasyonal"
                   className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs text-white outline-none"
@@ -9118,7 +9162,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <label className="block text-xs font-bold text-slate-300 mb-1">Biyografi Atis</label>
                 <textarea
                   rows={2}
-                  value={manualArtistBio}
+                  value={manualArtistBio ?? ''}
                   onChange={(e) => setManualArtistBio(e.target.value)}
                   placeholder="Kout deskripsyon sou karyè ak pakou atis la..."
                   className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl p-3 text-xs text-white outline-none resize-none"

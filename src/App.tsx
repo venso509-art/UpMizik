@@ -191,7 +191,15 @@ export default function App() {
 
     // Check existing logins
     const savedArtist = StorageService.getLoggedInArtist();
-    if (savedArtist) setCurrentArtist(savedArtist);
+    if (savedArtist) {
+      const freshArtist = localArtists.find(a => a.id === savedArtist.id) || savedArtist;
+      if (freshArtist.status === 'active') {
+        setCurrentArtist(freshArtist);
+      } else {
+        StorageService.setLoggedInArtist(null);
+        setCurrentArtist(null);
+      }
+    }
 
     const savedAdmin = StorageService.getLoggedInAdmin();
     if (savedAdmin && savedAdmin.role === 'super_admin') {
@@ -379,6 +387,31 @@ export default function App() {
       setMusicList(StorageService.getMusic());
     }
   }, [currentView, currentAdmin]);
+
+  // Pwoteksyon Espas Atis (artist_dashboard route guard):
+  // Menm si yon atis gen imèl ak kòd, si status li pa 'active', li pap ka rete oswa aksede artist_dashboard.
+  // Wout la voye l tounen sou 'public' otomatikman ak yon mesaj notifikasyon ki koresponn.
+  useEffect(() => {
+    if (currentView === 'artist_dashboard') {
+      const allArtists = StorageService.getArtists();
+      const freshArtist = currentArtist
+        ? allArtists.find((a) => a.id === currentArtist.id) || currentArtist
+        : null;
+
+      if (!freshArtist || freshArtist.status !== 'active') {
+        setCurrentView('public');
+        if (freshArtist?.status === 'pending' || (freshArtist as any)?.statut === 'en_attente') {
+          addToast('info', 'Aksè refize: Kont atis ou a an atant validasyon toujou pa Administratè a.');
+        } else if (freshArtist?.status === 'rejected' || (freshArtist as any)?.statut === 'rejete') {
+          addToast('error', 'Aksè refize: Enskripsyon atis ou a te rejte pa Administratè a.');
+        } else if (freshArtist?.status === 'suspended' || (freshArtist as any)?.statut === 'sispann') {
+          addToast('error', 'Aksè refize: Kont atis ou a tanporèman sispann pa Administratè a.');
+        } else {
+          addToast('error', 'Aksè refize: Ou dwe gen yon kont atis aktif ki valide pou w ka aksede Espas Atis la.');
+        }
+      }
+    }
+  }, [currentView, currentArtist, artists]);
   useEffect(() => {
     if (musicList.length === 0) return;
 
@@ -661,6 +694,21 @@ export default function App() {
 
   // Auth Handlers
   const handleArtistLoginSuccess = (artist: ArtistUser) => {
+    if (artist.status !== 'active') {
+      setCurrentArtist(null);
+      StorageService.setLoggedInArtist(null);
+      setCurrentView('public');
+      if (artist.status === 'pending' || (artist as any)?.statut === 'en_attente') {
+        addToast('info', 'Aksè refize: Kont atis ou a an atant validasyon toujou pa Administratè a.');
+      } else if (artist.status === 'rejected' || (artist as any)?.statut === 'rejete') {
+        addToast('error', 'Aksè refize: Enskripsyon atis ou a te rejte pa Administratè a.');
+      } else if (artist.status === 'suspended' || (artist as any)?.statut === 'sispann') {
+        addToast('error', 'Aksè refize: Kont atis ou a tanporèman sispann pa Administratè a.');
+      } else {
+        addToast('error', 'Aksè refize: Ou dwe gen yon kont atis aktif ki valide pou w ka aksede Espas Atis la.');
+      }
+      return;
+    }
     setCurrentArtist(artist);
     StorageService.setLoggedInArtist(artist);
     setCurrentView('artist_dashboard');
@@ -1231,7 +1279,7 @@ export default function App() {
         )}
 
         {/* ARTIST DASHBOARD VIEW */}
-        {currentView === 'artist_dashboard' && currentArtist && (
+        {currentView === 'artist_dashboard' && currentArtist && currentArtist.status === 'active' && (
           <ArtistDashboard
             currentArtist={currentArtist}
             artistSongs={currentArtistSongs}
@@ -1346,7 +1394,9 @@ export default function App() {
             ? musicList.filter(
                 (m) =>
                   m.artistId === selectedArtistForProfile.id ||
-                  m.collab?.artistId === selectedArtistForProfile.id
+                  m.collab?.artistId === selectedArtistForProfile.id ||
+                  (m.artistName && selectedArtistForProfile.stageName && m.artistName.trim().toLowerCase() === selectedArtistForProfile.stageName.trim().toLowerCase()) ||
+                  (m.collab?.artistName && selectedArtistForProfile.stageName && m.collab.artistName.trim().toLowerCase() === selectedArtistForProfile.stageName.trim().toLowerCase())
               )
             : []
         }

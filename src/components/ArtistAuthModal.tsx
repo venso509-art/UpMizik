@@ -180,29 +180,124 @@ export const ArtistAuthModal: React.FC<ArtistAuthModalProps> = ({
       const cleanEmail = loginEmail.trim().toLowerCase();
       const cleanPin = loginPin.trim();
 
-      const found = existingArtists.find(
-        a => (a.email.toLowerCase() === cleanEmail || a.phone.replace(/\s+/g, '') === cleanEmail.replace(/\s+/g, '')) && a.pin === cleanPin
+      // 0. Tcheke si kont lan bloke pa mekanis Rate Limiting (Fòs Brit)
+      const rateLimit = StorageService.getArtistRateLimitState(cleanEmail);
+      if (rateLimit.isLocked) {
+        setErrorMsg(`Kont sa a tanporèman bloke akòz twòp tantativ koneksyon ki echwe (Fòs brit detekte). Tanpri ret tann ${rateLimit.remainingMinutes} minit anvan ou re-eseye, oswa kontakte sipò a.`);
+        return;
+      }
+
+      // Pran tout atis ki nan StorageService ak nan props pou asire tout dènye enskripsyon yo la
+      const storedArtists = StorageService.getArtists();
+      const allArtists = [...storedArtists, ...existingArtists.filter(ea => !storedArtists.some(sa => sa.id === ea.id))];
+
+      // 1. Chèche si imèl la (oswa telefòn) deja egziste nan sistèm nan
+      const artistByEmail = allArtists.find(
+        a => (a.email.toLowerCase() === cleanEmail || a.phone.replace(/\s+/g, '') === cleanEmail.replace(/\s+/g, ''))
       );
 
-      if (found) {
-        if (found.status === 'pending') {
-          setTempArtist(found);
+      // Si imèl la jwenn
+      if (artistByEmail) {
+        // Ka 1: Kont la gen yon demann ki pako valide (en_attente / pending)
+        if (artistByEmail.status === 'pending' || (artistByEmail as any).statut === 'en_attente') {
+          StorageService.addActivityLog({
+            eventType: 'echec_connexion_pending',
+            email: cleanEmail,
+            artistId: artistByEmail.id,
+            artistName: artistByEmail.stageName || artistByEmail.name,
+            reason: 'Atis la eseye konekte nan artist_dashboard men kont li an atant validasyon $4.99 toujou pa Administratè a.',
+            status: 'warning'
+          });
+          setTempArtist(artistByEmail);
           setStep('login_pending_notice');
           return;
         }
-        if (found.status === 'rejected') {
-          setTempArtist(found);
+
+        // Ka 2: Kont la te rejte (rejected / rejete)
+        if (artistByEmail.status === 'rejected' || (artistByEmail as any).statut === 'rejete') {
+          StorageService.addActivityLog({
+            eventType: 'echec_connexion_rejete',
+            email: cleanEmail,
+            artistId: artistByEmail.id,
+            artistName: artistByEmail.stageName || artistByEmail.name,
+            reason: 'Atis la eseye konekte men demann enskripsyon li te rejte pa Administratè a.',
+            status: 'error'
+          });
+          setTempArtist(artistByEmail);
           setProofPreview('');
           setStep('login_rejected_notice');
           return;
         }
-        // Active or Suspended artist (can log in to view dashboard, stream stats & suspension details)
-        onLoginSuccess(found);
-        onClose();
-      } else {
-        setErrorMsg('Imèl oubyen Kòd PIN 4 chif la pa kòrèk. Verifye enfòmasyon ou.');
+
+        // Ka 3: Kont la sispann (suspended)
+        if (artistByEmail.status === 'suspended' || (artistByEmail as any).statut === 'suspendu') {
+          StorageService.addActivityLog({
+            eventType: 'echec_connexion_suspendu',
+            email: cleanEmail,
+            artistId: artistByEmail.id,
+            artistName: artistByEmail.stageName || artistByEmail.name,
+            reason: 'Atis la eseye konekte men kont li tanporèman sispann pa Administratè a.',
+            status: 'error'
+          });
+          setErrorMsg('Kont atis ou a tanporèman sispann pa Administratè a.');
+          return;
+        }
+
+        // Ka 4: Kont la valide (active) -> verifye si PIN nan kòrèk
+        if (artistByEmail.pin === cleanPin) {
+          // Koneksyon reyisi: netwaye tantativ echwe yo
+          StorageService.clearArtistRateLimit(cleanEmail);
+
+          StorageService.addActivityLog({
+            eventType: 'connexion_reussie',
+            email: cleanEmail,
+            artistId: artistByEmail.id,
+            artistName: artistByEmail.stageName || artistByEmail.name,
+            reason: 'Koneksyon reyisi avèk siksè nan artist_dashboard.',
+            status: 'success'
+          });
+          onLoginSuccess(artistByEmail);
+          onClose();
+          return;
+        } else {
+          // PIN nan pa kòrèk -> anrejistre tantativ echwe pou Rate Limiting
+          const attemptRes = StorageService.recordArtistFailedLoginAttempt(cleanEmail, artistByEmail);
+
+          StorageService.addActivityLog({
+            eventType: 'echec_connexion_identifiants',
+            email: cleanEmail,
+            artistId: artistByEmail.id,
+            artistName: artistByEmail.stageName || artistByEmail.name,
+            reason: `Kòd PIN oswa modpas sekrè a enkòrèk pou atis sa a (${artistByEmail.stageName || artistByEmail.name}). Tantativ ${attemptRes.failedAttempts}/5.`,
+            status: 'error'
+          });
+
+          if (attemptRes.isLocked) {
+            setErrorMsg(`Kont sa a bloke tanporèman pou ${attemptRes.remainingMinutes} minit akòz twòp tantativ koneksyon echwe (Fòs brit). Yo voye yon notifikasyon sekirite bay Administratè a.`);
+          } else {
+            const warnText = attemptRes.remainingAttempts <= 2 ? ` (Atansyon: ou rete sèlman ${attemptRes.remainingAttempts} tantativ anvan kont lan bloke tanporèman pou sekirite).` : '';
+            setErrorMsg(`Imèl ou a oubyen kòd ou a pa kòrèk, tanpri verifye.${warnText}`);
+          }
+          return;
+        }
       }
-    }, 600);
+
+      // Ka 5: Imèl la pa jwenn oswa kontak enkoni
+      const attemptRes = StorageService.recordArtistFailedLoginAttempt(cleanEmail);
+      StorageService.addActivityLog({
+        eventType: 'echec_connexion_identifiants',
+        email: cleanEmail,
+        reason: `Imèl oswa kontak '${cleanEmail}' pa jwenn nan baz done atis la. Tantativ ${attemptRes.failedAttempts}/5.`,
+        status: 'error'
+      });
+
+      if (attemptRes.isLocked) {
+        setErrorMsg(`Kont sa a bloke tanporèman pou ${attemptRes.remainingMinutes} minit akòz twòp tantativ koneksyon echwe. Yo voye yon notifikasyon sekirite bay Administratè a.`);
+      } else {
+        const warnText = attemptRes.remainingAttempts <= 2 ? ` (Atansyon: ou rete sèlman ${attemptRes.remainingAttempts} tantativ anvan kont lan bloke tanporèman pou sekirite).` : '';
+        setErrorMsg(`Imèl ou a oubyen kòd ou a pa kòrèk, tanpri verifye.${warnText}`);
+      }
+    }, 500);
   };
 
   const handleSignupSubmit = (e: React.FormEvent) => {
