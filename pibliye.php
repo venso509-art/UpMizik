@@ -26,15 +26,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($titre) || empty($nomArtiste)) {
         $error = 'Tanpri antre tit mizik la ak non atis la.';
     } elseif (!isset($_FILES['audio_file']) || $_FILES['audio_file']['error'] !== UPLOAD_ERR_OK) {
-        $error = 'Tanpri chwazi yon fichye odyo (MP3, WAV, AAC, M4A).';
+        $error = 'Tanpri chwazi yon fichye odyo valid (MP3 oswa WAV).';
     } else {
-        // Telechaje fichye odyo a dirèkteman sou sèvè Hostinger
-        $audioUpload = uploadServerFile($_FILES['audio_file'], 'musiques');
+        // Telechaje fichye odyo a avèk validasyon finfo_file ak move_uploaded_file nan /var/www/html/upmizik/uploads/
+        $audioUpload = handleAudioUpload($_FILES['audio_file']);
 
         if (!$audioUpload['success']) {
             $error = $audioUpload['message'];
         } else {
-            $audioUrl = $audioUpload['url'];
+            $audioUrl = $audioUpload['audioUrl'];
             $coverUrl = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80';
 
             // Telechaje foto kouvèti a si li bay li
@@ -62,20 +62,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
 
+                    $audioCol = getMusiquesAudioColumn($db);
                     $insertStmt = $db->prepare("
-                        INSERT INTO musiques (id, titre, artiste_id, nom_artiste, featuring, categorie, format, cover_url, audio_url, statut)
+                        INSERT INTO musiques (id, titre, artiste_id, nom_artiste, featuring, categorie, format, cover_url, `{$audioCol}`, statut)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'actif')
                     ");
                     $insertStmt->execute([
                         $musicId, $titre, $artisteId, $nomArtiste, $featuring, $categorie, $format, $coverUrl, $audioUrl
                     ]);
 
-                    $message = 'Mizik la telechaje epi anrejistre avèk siksè sou sèvè Hostinger a!';
+                    $message = 'Mizik la valide (finfo_file), estoke nan /var/www/html/upmizik/uploads/ epi sove nan kolòn ' . $audioCol . ' nan MySQL!';
                 } catch (Exception $e) {
                     $error = 'Erè pandan anrejistreman nan baz done a: ' . $e->getMessage();
                 }
             } else {
-                $message = 'Fichye mizik la anrejistre nan dosye /uploads/musiques/ sou sèvè a! (Konfigire MySQL nan config.php pou anrejistreman konplè).';
+                $message = 'Fichye mizik la anrejistre avèk siksè nan /var/www/html/upmizik/uploads/! (Konfigire MySQL nan config.php pou anrejistreman konplè).';
             }
         }
     }

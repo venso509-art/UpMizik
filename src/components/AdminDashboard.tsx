@@ -9,7 +9,8 @@ import {
   ArchiveRecord,
   MusicCategory,
   ReleaseFormat,
-  MusicCredit
+  MusicCredit,
+  SocialPost
 } from '../types';
 import {
   ShieldCheck,
@@ -93,7 +94,11 @@ import {
   Volume2,
   Radio,
   BellRing,
-  Activity
+  Activity,
+  UserPlus,
+  CheckSquare,
+  Square,
+  Layers
 } from 'lucide-react';
 import { compressAndReadFile } from '../utils/imageUtils';
 import { IdbStorage } from '../utils/idbStorage';
@@ -102,19 +107,27 @@ import { StorageService } from '../utils/storage';
 import { FirebaseService } from '../utils/firebase';
 import { SongCreditsEditor } from './SongCreditsEditor';
 import { SongCreditsModal } from './SongCreditsModal';
+import { BulkArtistActionBar, BulkArtistSuspendModal, BulkArtistRejectModal } from './BulkArtistModals';
 import { MonthlyRevenueBarChart } from './MonthlyRevenueBarChart';
 import { PalmaresTrophiesDashboard } from './PalmaresTrophiesDashboard';
 import { PaymentSettingsTab } from './PaymentSettingsTab';
 import { AdminSecurityTab } from './AdminSecurityTab';
 import { AdminActivityLogsTab } from './AdminActivityLogsTab';
+import { AdminSocialModerationTab } from './AdminSocialModerationTab';
 import { calculateArtistAwards } from '../utils/awardsUtils';
 
 export const DEFAULT_HTG_EXCHANGE_RATE = 145.0; // 1 USD = 145 HTG (Taux de R√©f√©rence March√© Ha√Øti)
 
-// Visual & Audio Alert for Live Incoming Donations
+// Visual & Audio Alert for Live Incoming Donations & Artist Registrations
 export interface LiveDonationAlertItem {
   id: string;
   donation: DonationItem;
+  timestamp: number;
+}
+
+export interface LiveArtistAlertItem {
+  id: string;
+  artist: ArtistUser;
   timestamp: number;
 }
 
@@ -187,11 +200,13 @@ interface AdminDashboardProps {
   onDeleteMusicItem: (musicId: string) => void;
   onSavePubs: (pubs: PubItem[]) => void;
   onSaveRpa: (rpa: RpaItem[]) => void;
+  socialPosts?: SocialPost[];
+  onDeleteSocialPost?: (postId: string) => void;
   onResetMonthlyDonations: (periodName?: string) => void;
   onLogoutAdmin: () => void;
 }
 
-type AdminTab = 'top3' | 'rpa' | 'pubs' | 'add_music' | 'validations' | 'artists_pending' | 'all_artists' | 'artist_payouts' | 'awards' | 'reports' | 'archive' | 'payment_settings' | 'security_logs' | 'logs_activite';
+type AdminTab = 'top3' | 'rpa' | 'pubs' | 'social_posts' | 'add_music' | 'validations' | 'artists_pending' | 'all_artists' | 'artist_payouts' | 'awards' | 'reports' | 'archive' | 'payment_settings' | 'security_logs' | 'logs_activite';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   currentAdmin,
@@ -213,6 +228,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onDeleteMusicItem,
   onSavePubs,
   onSaveRpa,
+  socialPosts,
+  onDeleteSocialPost,
   onResetMonthlyDonations,
   onLogoutAdmin
 }) => {
@@ -356,11 +373,102 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [showAddManualArtistModal, setShowAddManualArtistModal] = useState<boolean>(false);
   const [copiedValidationFieldId, setCopiedValidationFieldId] = useState<string | null>(null);
 
+  // Bulk Actions State for Artists (Multi-selection & batch operations)
+  const [selectedArtistIds, setSelectedArtistIds] = useState<string[]>([]);
+  const [showBulkSuspendModal, setShowBulkSuspendModal] = useState<boolean>(false);
+  const [bulkSuspensionDaysOption, setBulkSuspensionDaysOption] = useState<number>(15);
+  const [bulkCustomSuspensionDays, setBulkCustomSuspensionDays] = useState<string>('');
+  const [bulkSuspensionReason, setBulkSuspensionReason] = useState<string>('Vyolasyon r√®g ak kondisyon itilizasyon platf√≤m UpMizik la');
+  const [showBulkRejectModal, setShowBulkRejectModal] = useState<boolean>(false);
+  const [bulkRejectReason, setBulkRejectReason] = useState<string>('Foto pr√®v transf√® a pa kl√® oswa nimewo referans lan pa kowenside.');
+
   // Instant optimistic handlers
   const handleOptimisticValidateArtist = (artistId: string, accept: boolean, reason?: string) => {
     const targetStatus = accept ? 'active' : 'rejected';
     setOptimisticArtistStatus(prev => ({ ...prev, [artistId]: targetStatus }));
     onValidateArtist(artistId, accept, reason);
+    setInternalRefreshKey(k => k + 1);
+  };
+
+  // Bulk Handlers for Artists
+  const handleToggleSelectArtist = (artistId: string) => {
+    setSelectedArtistIds(prev =>
+      prev.includes(artistId) ? prev.filter(id => id !== artistId) : [...prev, artistId]
+    );
+  };
+
+  const handleSelectAllArtistsInList = (targetList: ArtistUser[]) => {
+    const targetIds = targetList.map(a => a.id);
+    if (targetIds.length === 0) return;
+    const isAllSelected = targetIds.length > 0 && targetIds.every(id => selectedArtistIds.includes(id));
+    if (isAllSelected) {
+      setSelectedArtistIds(prev => prev.filter(id => !targetIds.includes(id)));
+    } else {
+      setSelectedArtistIds(prev => Array.from(new Set([...prev, ...targetIds])));
+    }
+  };
+
+  const handleClearArtistSelection = () => {
+    setSelectedArtistIds([]);
+  };
+
+  const handleBulkValidateSelectedArtists = () => {
+    if (selectedArtistIds.length === 0) return;
+    const targetIds = [...selectedArtistIds];
+    const newOptimistic: Record<string, 'active'> = {};
+    targetIds.forEach(id => {
+      newOptimistic[id] = 'active';
+      onValidateArtist(id, true);
+    });
+    setOptimisticArtistStatus(prev => ({ ...prev, ...newOptimistic }));
+    setInternalRefreshKey(k => k + 1);
+    setSelectedArtistIds([]);
+  };
+
+  const handleBulkRejectSelectedArtists = (reason?: string) => {
+    if (selectedArtistIds.length === 0) return;
+    const targetIds = [...selectedArtistIds];
+    const finalReason = reason || bulkRejectReason || 'Foto pr√®v transf√® a pa kl√® oswa nimewo referans lan pa kowenside.';
+    const newOptimistic: Record<string, 'rejected'> = {};
+    targetIds.forEach(id => {
+      newOptimistic[id] = 'rejected';
+      onValidateArtist(id, false, finalReason);
+    });
+    setOptimisticArtistStatus(prev => ({ ...prev, ...newOptimistic }));
+    setInternalRefreshKey(k => k + 1);
+    setShowBulkRejectModal(false);
+    setSelectedArtistIds([]);
+  };
+
+  const handleBulkSuspendSelectedArtists = () => {
+    if (selectedArtistIds.length === 0) return;
+    const effectiveDays = bulkCustomSuspensionDays.trim() !== ''
+      ? Math.max(1, parseInt(bulkCustomSuspensionDays) || 15)
+      : bulkSuspensionDaysOption;
+    const reason = bulkSuspensionReason.trim() || undefined;
+
+    selectedArtistIds.forEach(id => {
+      if (onSuspendArtist) {
+        onSuspendArtist(id, effectiveDays, reason);
+      } else {
+        StorageService.suspendArtist(id, effectiveDays, reason, currentAdmin?.name || 'Mr Clauvens');
+      }
+    });
+    setShowBulkSuspendModal(false);
+    setSelectedArtistIds([]);
+    setInternalRefreshKey(k => k + 1);
+  };
+
+  const handleBulkReactivateSelectedArtists = () => {
+    if (selectedArtistIds.length === 0) return;
+    selectedArtistIds.forEach(id => {
+      if (onReactivateArtist) {
+        onReactivateArtist(id);
+      } else {
+        StorageService.reactivateArtist(id, currentAdmin?.name || 'Mr Clauvens');
+      }
+    });
+    setSelectedArtistIds([]);
     setInternalRefreshKey(k => k + 1);
   };
 
@@ -397,9 +505,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Reactive Storage & Custom Event Synchronization
   const [internalRefreshKey, setInternalRefreshKey] = useState<number>(0);
 
-  // Live Real-Time Donation Notifications State
+  // Live Real-Time Notifications State (Only displayed & active when Admin is actively logged in)
   const [liveDonationToasts, setLiveDonationToasts] = useState<LiveDonationAlertItem[]>([]);
   const [recentLiveDonations, setRecentLiveDonations] = useState<DonationItem[]>([]);
+  const [liveArtistToasts, setLiveArtistToasts] = useState<LiveArtistAlertItem[]>([]);
+  const [recentLiveArtists, setRecentLiveArtists] = useState<ArtistUser[]>([]);
   const [isLiveAudioEnabled, setIsLiveAudioEnabled] = useState<boolean>(() => {
     try {
       return localStorage.getItem('upmizik_admin_sound_enabled') !== 'false';
@@ -408,6 +518,51 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   });
   const [isLiveBannerDismissed, setIsLiveBannerDismissed] = useState<boolean>(false);
+
+  // Helper to completely clear and wipe all cached notification arrays and pending live data
+  const clearAllLiveNotifications = React.useCallback(() => {
+    setLiveDonationToasts([]);
+    setRecentLiveDonations([]);
+    setLiveArtistToasts([]);
+    setRecentLiveArtists([]);
+    setIsLiveBannerDismissed(true);
+    setRealtimeFirestoreArtists(null);
+    setRealtimeFirestoreDonations(null);
+    if (knownDonationIdsRef.current) knownDonationIdsRef.current.clear();
+    if (knownArtistIdsRef.current) knownArtistIdsRef.current.clear();
+  }, []);
+
+  // Secure admin logout trigger ensuring all cached notifications, pending lists, and sensitive memory states are explicitly wiped clean
+  const handleAdminLogout = React.useCallback(() => {
+    // 1. Explicitly wipe all cached live notification arrays and banner states
+    clearAllLiveNotifications();
+    
+    // 2. Wipe sensitive active modals and optimistic local states
+    setOptimisticArtistStatus({});
+    setOptimisticDonationStatus({});
+    setSelectedArtistDossier(null);
+    setProofModalUrl(null);
+    setProofModalDetails(null);
+    setProofModalInfo(null);
+    setSuspendingArtistTarget(null);
+    setDeletingArtistTarget(null);
+    setPayingArtistTarget(null);
+    setArtistRejectTarget(null);
+    setSelectedArtistForSongBreakdown(null);
+    setEditingSong(null);
+    setPreviewingCreditsSong(null);
+    setShowResetConfirm(false);
+    setShowSecurityAuthModal(false);
+    setIsSecurityUnlocked(false);
+    setSelectedArtistIds([]);
+    setShowBulkSuspendModal(false);
+    setShowBulkRejectModal(false);
+
+    // 3. Invoke parent logout handler
+    if (onLogoutAdmin) {
+      onLogoutAdmin();
+    }
+  }, [clearAllLiveNotifications, onLogoutAdmin]);
 
   const toggleLiveAudio = () => {
     setIsLiveAudioEnabled(prev => {
@@ -420,14 +575,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const knownDonationIdsRef = React.useRef<Set<string>>(new Set());
+  const knownArtistIdsRef = React.useRef<Set<string>>(new Set());
   const isInitialMountRef = React.useRef<boolean>(true);
 
   const dismissLiveToast = (toastId: string) => {
     setLiveDonationToasts(prev => prev.filter(t => t.id !== toastId));
   };
 
+  const dismissLiveArtistToast = (toastId: string) => {
+    setLiveArtistToasts(prev => prev.filter(t => t.id !== toastId));
+  };
+
   const triggerLiveDonationAlert = React.useCallback((don: DonationItem) => {
-    const alertId = `alert_${don.id}_${Date.now()}`;
+    // Strict Guard: Only populate notification arrays when currentAdmin is actively truthy & super_admin
+    if (!currentAdmin || !currentAdmin.email || currentAdmin.role !== 'super_admin') {
+      clearAllLiveNotifications();
+      return;
+    }
+
+    const alertId = `alert_don_${don.id}_${Date.now()}`;
     const newToastItem: LiveDonationAlertItem = {
       id: alertId,
       donation: don,
@@ -435,11 +601,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
 
     setLiveDonationToasts(prev => {
+      if (!currentAdmin || !currentAdmin.email) return [];
       const filtered = prev.filter(t => t.donation.id !== don.id);
       return [newToastItem, ...filtered].slice(0, 4);
     });
 
     setRecentLiveDonations(prev => {
+      if (!currentAdmin || !currentAdmin.email) return [];
       const filtered = prev.filter(d => d.id !== don.id);
       return [don, ...filtered].slice(0, 6);
     });
@@ -454,27 +622,154 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTimeout(() => {
       setLiveDonationToasts(prev => prev.filter(t => t.id !== alertId));
     }, 12000);
-  }, [isLiveAudioEnabled]);
+  }, [currentAdmin, isLiveAudioEnabled, clearAllLiveNotifications]);
+
+  const triggerLiveArtistAlert = React.useCallback((art: ArtistUser) => {
+    // Strict Guard: Only populate notification arrays when currentAdmin is actively truthy & super_admin
+    if (!currentAdmin || !currentAdmin.email || currentAdmin.role !== 'super_admin') {
+      clearAllLiveNotifications();
+      return;
+    }
+
+    const alertId = `alert_art_${art.id}_${Date.now()}`;
+    const newToastItem: LiveArtistAlertItem = {
+      id: alertId,
+      artist: art,
+      timestamp: Date.now()
+    };
+
+    setLiveArtistToasts(prev => {
+      if (!currentAdmin || !currentAdmin.email) return [];
+      const filtered = prev.filter(t => t.artist.id !== art.id);
+      return [newToastItem, ...filtered].slice(0, 4);
+    });
+
+    setRecentLiveArtists(prev => {
+      if (!currentAdmin || !currentAdmin.email) return [];
+      const filtered = prev.filter(a => a.id !== art.id);
+      return [art, ...filtered].slice(0, 6);
+    });
+
+    setIsLiveBannerDismissed(false);
+
+    if (isLiveAudioEnabled) {
+      playLiveDonationChime();
+    }
+
+    // Auto-dismiss this toast after 12 seconds
+    setTimeout(() => {
+      setLiveArtistToasts(prev => prev.filter(t => t.id !== alertId));
+    }, 12000);
+  }, [currentAdmin, isLiveAudioEnabled, clearAllLiveNotifications]);
 
   // Real-time Firestore Live Subscriptions using onSnapshot
   const [realtimeFirestoreArtists, setRealtimeFirestoreArtists] = useState<ArtistUser[] | null>(null);
   const [realtimeFirestoreDonations, setRealtimeFirestoreDonations] = useState<DonationItem[] | null>(null);
 
-  // Initial population of existing donation IDs
+  // Dedicated Security & Session Watcher Effect:
+  // Verifies currentAdmin & localStorage to ensure live notifications and pending data are strictly confined to active admin sessions.
+  // If the admin logs out, all notification queues and sensitive pending records in React memory are wiped immediately.
   React.useEffect(() => {
+    const verifyAdminSession = () => {
+      try {
+        const storedAdmin = StorageService.getLoggedInAdmin();
+        const hasValidSession = Boolean(
+          currentAdmin &&
+          currentAdmin.email &&
+          currentAdmin.role === 'super_admin' &&
+          storedAdmin &&
+          storedAdmin.email === currentAdmin.email &&
+          storedAdmin.role === 'super_admin'
+        );
+
+        if (!hasValidSession) {
+          // Clear all live notifications and pending alert states in React memory immediately
+          clearAllLiveNotifications();
+          setOptimisticArtistStatus({});
+          setOptimisticDonationStatus({});
+          setSelectedArtistDossier(null);
+          setProofModalUrl(null);
+          setProofModalDetails(null);
+          setProofModalInfo(null);
+          setSelectedArtistIds([]);
+          setShowBulkSuspendModal(false);
+          setShowBulkRejectModal(false);
+
+          if (!storedAdmin && onLogoutAdmin) {
+            onLogoutAdmin();
+          }
+        }
+      } catch {
+        clearAllLiveNotifications();
+      }
+    };
+
+    // Initial check on mount or when currentAdmin prop changes
+    verifyAdminSession();
+
+    // Listen for storage events (e.g. admin logging out in another tab or clearing localStorage)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'upmizik_current_admin_v1' || e.key === null) {
+        verifyAdminSession();
+      }
+    };
+
+    // Check periodically every 2 seconds for high-security session integrity
+    const intervalId = setInterval(verifyAdminSession, 2000);
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [currentAdmin, clearAllLiveNotifications, onLogoutAdmin]);
+
+  // Initial population of existing donation IDs and artist IDs
+  React.useEffect(() => {
+    if (!currentAdmin || !currentAdmin.email || currentAdmin.role !== 'super_admin') {
+      clearAllLiveNotifications();
+      return;
+    }
+
     try {
-      const initial = StorageService.getDonations(currentAdmin);
-      initial.forEach(d => knownDonationIdsRef.current.add(d.id));
+      const initialDonations = StorageService.getDonations(currentAdmin);
+      initialDonations.forEach(d => knownDonationIdsRef.current.add(d.id));
+      const initialArtists = StorageService.getArtists();
+      initialArtists.forEach(a => knownArtistIdsRef.current.add(a.id));
     } catch {}
     isInitialMountRef.current = false;
-  }, [currentAdmin]);
+
+    return () => {
+      clearAllLiveNotifications();
+    };
+  }, [currentAdmin, clearAllLiveNotifications]);
 
   // Real-time Firestore onSnapshot Subscriptions for Artists and Donations
   React.useEffect(() => {
+    if (!currentAdmin || !currentAdmin.email || currentAdmin.role !== 'super_admin') {
+      clearAllLiveNotifications();
+      return;
+    }
+
     // 1. Subscribe to 'artists' collection onSnapshot
     const unsubscribeArtists = FirebaseService.subscribeToArtists((cloudArtists) => {
+      if (!currentAdmin || !currentAdmin.email) {
+        clearAllLiveNotifications();
+        return;
+      }
       if (cloudArtists && cloudArtists.length > 0) {
         setRealtimeFirestoreArtists(cloudArtists);
+
+        // Detect new pending artist registrations to trigger live alert sound/toast in real-time
+        cloudArtists.forEach(art => {
+          if (!knownArtistIdsRef.current.has(art.id)) {
+            knownArtistIdsRef.current.add(art.id);
+            if (!isInitialMountRef.current && (art.status === 'pending' || !art.status)) {
+              triggerLiveArtistAlert(art);
+            }
+          }
+        });
+
         // Safely update local storage without overwriting validated/rejected status
         try {
           const currentLocal = StorageService.getArtists();
@@ -508,6 +803,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     // 2. Subscribe to 'donations' collection onSnapshot
     const unsubscribeDonations = FirebaseService.subscribeToDonations((cloudDonations) => {
+      if (!currentAdmin || !currentAdmin.email) {
+        clearAllLiveNotifications();
+        return;
+      }
       if (cloudDonations && cloudDonations.length > 0) {
         setRealtimeFirestoreDonations(cloudDonations);
         // Detect new pending donations to trigger live alert sound/toast in real-time
@@ -549,6 +848,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
 
     const handleDonationCustomSync = (event: Event) => {
+      if (!currentAdmin || !currentAdmin.email) return;
       setInternalRefreshKey(k => k + 1);
       const customEv = event as CustomEvent<{ action?: string; donation?: DonationItem }>;
       
@@ -561,13 +861,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     };
 
+    const handleArtistCustomSync = (event: Event) => {
+      if (!currentAdmin || !currentAdmin.email) return;
+      setInternalRefreshKey(k => k + 1);
+      const customEv = event as CustomEvent<{ action?: string; artist?: ArtistUser }>;
+      
+      if ((customEv.detail?.action === 'register' || customEv.detail?.action === 'add') && customEv.detail?.artist) {
+        const incoming = customEv.detail.artist;
+        if (!knownArtistIdsRef.current.has(incoming.id)) {
+          knownArtistIdsRef.current.add(incoming.id);
+          triggerLiveArtistAlert(incoming);
+        }
+      }
+    };
+
     const handleStorageOrCustomSync = () => {
       setInternalRefreshKey(k => k + 1);
 
       // Check for any newly added pending donations in storage that we haven't seen yet
       try {
-        const freshList = StorageService.getDonations(currentAdmin);
-        freshList.forEach(don => {
+        const freshDonations = StorageService.getDonations(currentAdmin);
+        freshDonations.forEach(don => {
           if (!knownDonationIdsRef.current.has(don.id)) {
             knownDonationIdsRef.current.add(don.id);
             if (!isInitialMountRef.current && don.status === 'pending') {
@@ -575,10 +889,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }
           }
         });
+
+        // Check for any newly added pending artist registrations in storage
+        const freshArtists = StorageService.getArtists();
+        freshArtists.forEach(art => {
+          if (!knownArtistIdsRef.current.has(art.id)) {
+            knownArtistIdsRef.current.add(art.id);
+            if (!isInitialMountRef.current && (art.status === 'pending' || !art.status)) {
+              triggerLiveArtistAlert(art);
+            }
+          }
+        });
       } catch {}
     };
 
-    window.addEventListener('upmizik_artist_updated', handleStorageOrCustomSync);
+    window.addEventListener('upmizik_artist_updated', handleArtistCustomSync);
     window.addEventListener('upmizik_donation_updated', handleDonationCustomSync);
     window.addEventListener('upmizik_music_updated', handleStorageOrCustomSync);
     window.addEventListener('storage', handleStorageOrCustomSync);
@@ -586,12 +911,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return () => {
       unsubscribeArtists();
       unsubscribeDonations();
-      window.removeEventListener('upmizik_artist_updated', handleStorageOrCustomSync);
+      window.removeEventListener('upmizik_artist_updated', handleArtistCustomSync);
       window.removeEventListener('upmizik_donation_updated', handleDonationCustomSync);
       window.removeEventListener('upmizik_music_updated', handleStorageOrCustomSync);
       window.removeEventListener('storage', handleStorageOrCustomSync);
+      clearAllLiveNotifications();
     };
-  }, [currentAdmin, triggerLiveDonationAlert]);
+  }, [currentAdmin, triggerLiveDonationAlert, triggerLiveArtistAlert, clearAllLiveNotifications]);
 
   // Effective donations: prefer real-time Firestore onSnapshot list, merged with stored list
   const effectiveDonations = useMemo(() => {
@@ -1244,7 +1570,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="flex items-center gap-2.5">
           <button
             id="admin-logout-btn"
-            onClick={onLogoutAdmin}
+            onClick={handleAdminLogout}
             className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#05070a] hover:bg-white/[0.08] text-red-400 border border-red-900/50 flex items-center gap-2 transition-colors shadow-lg"
           >
             <LogOut className="w-4 h-4" />
@@ -1518,156 +1844,295 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
-      {/* FLOATING REAL-TIME DONATION NOTIFICATIONS TOAST STACK */}
-      <div
-        id="admin-live-donation-toasts-container"
-        className="fixed top-4 sm:top-6 right-4 sm:right-6 z-[9999] flex flex-col gap-3 max-w-sm sm:max-w-md w-full pointer-events-none"
-        aria-live="polite"
-      >
-        {liveDonationToasts.map((toastItem) => {
-          const { id: toastId, donation: don } = toastItem;
-          const donHtg = Math.round(toHtg(don.amount));
-          const methodLabel = don.donorPhone?.startsWith('+1') || don.donorPhone?.includes('card')
-            ? 'Kat labank'
-            : don.donorPhone?.startsWith('4') || don.donorPhone?.startsWith('+5094')
-            ? 'Natcash'
-            : 'MonCash';
+      {/* FLOATING REAL-TIME NOTIFICATIONS TOAST STACK (DONATIONS & ARTIST REGISTRATIONS) */}
+      {currentAdmin?.email && (liveDonationToasts.length > 0 || liveArtistToasts.length > 0) && (
+        <div
+          id="admin-live-donation-toasts-container"
+          className="fixed top-4 sm:top-6 right-4 sm:right-6 z-[9999] flex flex-col gap-3 max-w-sm sm:max-w-md w-full pointer-events-none"
+          aria-live="polite"
+        >
+          {/* 1. Live Artist Registration Toasts */}
+          {liveArtistToasts.map((toastItem) => {
+            const { id: toastId, artist: art } = toastItem;
+            const artFeeHtg = Math.round(toHtg(4.99));
 
-          return (
-            <div
-              key={toastId}
-              id={`live-toast-${don.id}`}
-              className="pointer-events-auto relative overflow-hidden bg-gradient-to-br from-[#1c1404]/98 via-[#0f172a]/98 to-[#06241a]/98 border-2 border-amber-400 rounded-2xl p-4 shadow-[0_12px_45px_rgba(245,158,11,0.35)] backdrop-blur-2xl animate-bounce-short transition-all"
-            >
-              {/* Top Accent Pulsing Glow */}
-              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-400 via-yellow-300 to-emerald-400 animate-pulse" />
+            return (
+              <div
+                key={toastId}
+                id={`live-artist-toast-${art.id}`}
+                className="pointer-events-auto relative overflow-hidden bg-gradient-to-br from-[#1b0d2b]/98 via-[#0f172a]/98 to-[#0b1c2b]/98 border-2 border-purple-400 rounded-2xl p-4 shadow-[0_12px_45px_rgba(168,85,247,0.35)] backdrop-blur-2xl animate-bounce-short transition-all"
+              >
+                {/* Top Accent Pulsing Glow */}
+                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-400 via-pink-400 to-indigo-400 animate-pulse" />
 
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-amber-500/40 shrink-0">
-                    <BellRing className="w-5 h-5 text-slate-950 animate-pulse" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-red-600 text-white shadow-sm font-sans">
-                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                        NOUVO SIP√í AN TAN REY√àL
-                      </span>
-                      <span className="text-[10px] text-amber-300 font-bold font-mono">
-                        F√®k Resevwa!
-                      </span>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-white font-black shadow-lg shadow-purple-500/40 shrink-0">
+                      <UserPlus className="w-5 h-5 text-white animate-pulse" />
                     </div>
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-600 text-white shadow-sm font-sans">
+                          <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                          NOUVO ENSKRIPSYON ATIS
+                        </span>
+                        <span className="text-[10px] text-purple-300 font-bold font-mono">
+                          F√®k Monte!
+                        </span>
+                      </div>
 
-                    <h4 className="text-sm font-black text-white mt-1">
-                      {don.donorName || 'Yon Fanatik'} te voye yon sip√≤!
-                    </h4>
+                      <h4 className="text-sm font-black text-white mt-1">
+                        {art.stageName || art.name} mande entegrasyon!
+                      </h4>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => dismissLiveArtistToast(toastId)}
+                    className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.1] transition-colors"
+                    title="F√®men notifikasyon an"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Artist Details Card */}
+                <div className="mt-3 bg-black/60 border border-purple-500/30 rounded-xl p-2.5 flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-slate-200 truncate font-semibold">
+                      Non rey√®l: <span className="text-purple-300">{art.name || art.stageName}</span>
+                    </p>
+                    <p className="text-[11px] text-slate-400 truncate">
+                      Vil: <span className="text-white font-medium">{art.city || 'Ayiti'}</span>
+                    </p>
+                    {art.phone && (
+                      <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                        Tel: {art.phone}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="text-right shrink-0 bg-purple-400/10 border border-purple-400/30 px-2.5 py-1 rounded-lg">
+                    <span className="text-sm font-black text-purple-300 font-mono block">
+                      $4.99 USD
+                    </span>
+                    <span className="text-[10px] text-slate-300 font-mono block">
+                      ~{artFeeHtg.toLocaleString()} HTG
+                    </span>
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => dismissLiveToast(toastId)}
-                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.1] transition-colors"
-                  title="F√®men notifikasyon an"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+                {/* Action Buttons */}
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    {art.paymentProofUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProofModalInfo({
+                            url: art.paymentProofUrl!,
+                            title: `Pr√®v Fr√® Enskripsyon - ${art.stageName}`,
+                            donorOrArtistName: `${art.stageName} (${art.name})`,
+                            phone: art.phone || 'N/A',
+                            amount: `$4.99 USD (~${artFeeHtg.toLocaleString()} HTG)`,
+                            date: new Date(art.createdAt || Date.now()).toLocaleString('fr-FR'),
+                            type: 'artist_fee'
+                          });
+                          setProofZoom(1);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white/[0.08] hover:bg-white/[0.16] text-slate-200 border border-white/[0.12] flex items-center gap-1 transition-all"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-purple-300" />
+                        <span>Gade Pr√®v</span>
+                      </button>
+                    )}
 
-              {/* Donation Details Card */}
-              <div className="mt-3 bg-black/60 border border-amber-500/30 rounded-xl p-2.5 flex items-center justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs text-slate-200 truncate font-semibold">
-                    Moso: <span className="text-amber-300">"{don.musicTitle}"</span>
-                  </p>
-                  <p className="text-[11px] text-slate-400 truncate">
-                    Atis: <span className="text-white font-medium">{don.artistName}</span>
-                  </p>
-                  {don.donorPhone && (
-                    <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                      Tel: {don.donorPhone} ({methodLabel})
-                    </p>
-                  )}
-                </div>
-
-                <div className="text-right shrink-0 bg-amber-400/10 border border-amber-400/30 px-2.5 py-1 rounded-lg">
-                  <span className="text-sm font-black text-amber-400 font-mono block">
-                    ${don.amount.toFixed(2)} USD
-                  </span>
-                  <span className="text-[10px] text-slate-300 font-mono block">
-                    ~{donHtg.toLocaleString()} HTG
-                  </span>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  {don.proofUrl && (
                     <button
                       type="button"
                       onClick={() => {
-                        setProofModalInfo({
-                          url: don.proofUrl!,
-                          title: `Pr√®v Sip√≤ - ${don.donorName || 'Fanatik'}`,
-                          donorOrArtistName: `${don.donorName || 'Fanatik'} pou ${don.artistName}`,
-                          phone: don.donorPhone || 'N/A',
-                          amount: `$${don.amount.toFixed(2)} USD (~${donHtg.toLocaleString()} HTG)`,
-                          musicTitle: don.musicTitle,
-                          date: new Date(don.createdAt).toLocaleString('fr-FR'),
-                          type: 'support'
-                        });
-                        setProofZoom(1);
+                        setActiveTab('validations');
+                        setValidationCategoryFilter('artists');
+                        dismissLiveArtistToast(toastId);
                       }}
-                      className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white/[0.08] hover:bg-white/[0.16] text-slate-200 border border-white/[0.12] flex items-center gap-1 transition-all"
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white transition-colors"
                     >
-                      <Eye className="w-3.5 h-3.5 text-amber-300" />
-                      <span>Gade Pr√®v</span>
+                      Ale nan Tab
                     </button>
-                  )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleOptimisticValidateArtist(art.id, true);
+                        dismissLiveArtistToast(toastId);
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-black bg-gradient-to-r from-purple-400 to-indigo-400 hover:from-purple-300 hover:to-indigo-300 text-slate-950 flex items-center gap-1 shadow-md shadow-purple-500/25 active:scale-95 transition-all"
+                    >
+                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                      <span>Valide Atis</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Auto-Dismiss Timer Bar */}
+                <div className="mt-2.5 w-full bg-white/[0.08] h-1 rounded-full overflow-hidden">
+                  <div
+                    className="bg-purple-400 h-full rounded-full"
+                    style={{ animation: 'shrinkWidth 12s linear forwards' }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+
+          {/* 2. Live Donation Toasts */}
+          {liveDonationToasts.map((toastItem) => {
+            const { id: toastId, donation: don } = toastItem;
+            const donHtg = Math.round(toHtg(don.amount));
+            const methodLabel = don.donorPhone?.startsWith('+1') || don.donorPhone?.includes('card')
+              ? 'Kat labank'
+              : don.donorPhone?.startsWith('4') || don.donorPhone?.startsWith('+5094')
+              ? 'Natcash'
+              : 'MonCash';
+
+            return (
+              <div
+                key={toastId}
+                id={`live-toast-${don.id}`}
+                className="pointer-events-auto relative overflow-hidden bg-gradient-to-br from-[#1c1404]/98 via-[#0f172a]/98 to-[#06241a]/98 border-2 border-amber-400 rounded-2xl p-4 shadow-[0_12px_45px_rgba(245,158,11,0.35)] backdrop-blur-2xl animate-bounce-short transition-all"
+              >
+                {/* Top Accent Pulsing Glow */}
+                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-400 via-yellow-300 to-emerald-400 animate-pulse" />
+
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-amber-500/40 shrink-0">
+                      <BellRing className="w-5 h-5 text-slate-950 animate-pulse" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-red-600 text-white shadow-sm font-sans">
+                          <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                          NOUVO SIP√í AN TAN REY√àL
+                        </span>
+                        <span className="text-[10px] text-amber-300 font-bold font-mono">
+                          F√®k Resevwa!
+                        </span>
+                      </div>
+
+                      <h4 className="text-sm font-black text-white mt-1">
+                        {don.donorName || 'Yon Fanatik'} te voye yon sip√≤!
+                      </h4>
+                    </div>
+                  </div>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setActiveTab('validations');
-                      setValidationCategoryFilter('donations');
-                      dismissLiveToast(toastId);
-                    }}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white transition-colors"
+                    onClick={() => dismissLiveToast(toastId)}
+                    className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.1] transition-colors"
+                    title="F√®men notifikasyon an"
                   >
-                    Ale nan Tab
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
 
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onValidateDonation(don.id, true);
-                      dismissLiveToast(toastId);
-                    }}
-                    className="px-3 py-1.5 rounded-lg text-xs font-black bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-slate-950 flex items-center gap-1 shadow-md shadow-emerald-500/25 active:scale-95 transition-all"
-                  >
-                    <Check className="w-3.5 h-3.5 stroke-[3]" />
-                    <span>Valide</span>
-                  </button>
+                {/* Donation Details Card */}
+                <div className="mt-3 bg-black/60 border border-amber-500/30 rounded-xl p-2.5 flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-slate-200 truncate font-semibold">
+                      Moso: <span className="text-amber-300">"{don.musicTitle}"</span>
+                    </p>
+                    <p className="text-[11px] text-slate-400 truncate">
+                      Atis: <span className="text-white font-medium">{don.artistName}</span>
+                    </p>
+                    {don.donorPhone && (
+                      <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                        Tel: {don.donorPhone} ({methodLabel})
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="text-right shrink-0 bg-amber-400/10 border border-amber-400/30 px-2.5 py-1 rounded-lg">
+                    <span className="text-sm font-black text-amber-400 font-mono block">
+                      ${don.amount.toFixed(2)} USD
+                    </span>
+                    <span className="text-[10px] text-slate-300 font-mono block">
+                      ~{donHtg.toLocaleString()} HTG
+                    </span>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    {don.proofUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProofModalInfo({
+                            url: don.proofUrl!,
+                            title: `Pr√®v Sip√≤ - ${don.donorName || 'Fanatik'}`,
+                            donorOrArtistName: `${don.donorName || 'Fanatik'} pou ${don.artistName}`,
+                            phone: don.donorPhone || 'N/A',
+                            amount: `$${don.amount.toFixed(2)} USD (~${donHtg.toLocaleString()} HTG)`,
+                            musicTitle: don.musicTitle,
+                            date: new Date(don.createdAt).toLocaleString('fr-FR'),
+                            type: 'support'
+                          });
+                          setProofZoom(1);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white/[0.08] hover:bg-white/[0.16] text-slate-200 border border-white/[0.12] flex items-center gap-1 transition-all"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-amber-300" />
+                        <span>Gade Pr√®v</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab('validations');
+                        setValidationCategoryFilter('donations');
+                        dismissLiveToast(toastId);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white transition-colors"
+                    >
+                      Ale nan Tab
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onValidateDonation(don.id, true);
+                        dismissLiveToast(toastId);
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-black bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-slate-950 flex items-center gap-1 shadow-md shadow-emerald-500/25 active:scale-95 transition-all"
+                    >
+                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                      <span>Valide</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Auto-Dismiss Timer Bar */}
+                <div className="mt-2.5 w-full bg-white/[0.08] h-1 rounded-full overflow-hidden">
+                  <div
+                    className="bg-amber-400 h-full rounded-full"
+                    style={{ animation: 'shrinkWidth 12s linear forwards' }}
+                  />
                 </div>
               </div>
+            );
+          })}
+        </div>
+      )}
 
-              {/* Auto-Dismiss Timer Bar */}
-              <div className="mt-2.5 w-full bg-white/[0.08] h-1 rounded-full overflow-hidden">
-                <div
-                  className="bg-amber-400 h-full rounded-full"
-                  style={{ animation: 'shrinkWidth 12s linear forwards' }}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* REAL-TIME LIVE DONATION STREAM BANNER */}
-      {recentLiveDonations.length > 0 && !isLiveBannerDismissed && (
+      {/* REAL-TIME LIVE ACTIVITY STREAM BANNER (DONATIONS & ARTIST REGISTRATIONS) */}
+      {Boolean(currentAdmin?.email) && (recentLiveDonations.length > 0 || recentLiveArtists.length > 0) && !isLiveBannerDismissed && (
         <div className="relative overflow-hidden bg-gradient-to-r from-[#1c1203]/95 via-[#101b2e]/95 to-[#06291e]/95 border-2 border-yellow-400/80 rounded-3xl p-4 sm:p-5 shadow-[0_0_35px_rgba(250,204,21,0.25)] backdrop-blur-xl animate-fadeIn">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-start sm:items-center gap-3.5">
@@ -1675,25 +2140,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <Radio className="w-5 h-5 text-slate-950 animate-pulse" />
               </div>
               <div>
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-red-600 text-white font-sans shadow-sm flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
                     AN TAN REY√àL
                   </span>
-                  <span className="text-[11px] text-yellow-300 font-bold font-mono">
-                    {recentLiveDonations.length} nouvo donasyon rive nan sesyon an
-                  </span>
+                  {recentLiveDonations.length > 0 && (
+                    <span className="text-[11px] text-yellow-300 font-bold font-mono">
+                      {recentLiveDonations.length} nouvo donasyon rive
+                    </span>
+                  )}
+                  {recentLiveArtists.length > 0 && (
+                    <span className="text-[11px] text-purple-300 font-bold font-mono">
+                      {recentLiveArtists.length} nouvo demand atis
+                    </span>
+                  )}
                 </div>
-                <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-2 flex-wrap">
-                  <span>D√®nye donasyon:</span>
-                  <span className="text-yellow-400 font-bold">{recentLiveDonations[0].donorName}</span>
-                  <span className="text-slate-300 font-mono text-xs">(${recentLiveDonations[0].amount.toFixed(2)} USD / ~{Math.round(toHtg(recentLiveDonations[0].amount)).toLocaleString()} HTG)</span>
-                  <span>pou</span>
-                  <span className="text-emerald-300 font-medium">"{recentLiveDonations[0].musicTitle}"</span>
-                  <span className="text-slate-400">({recentLiveDonations[0].artistName})</span>
-                </h3>
+
+                {recentLiveDonations.length > 0 ? (
+                  <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-2 flex-wrap">
+                    <span>D√®nye donasyon:</span>
+                    <span className="text-yellow-400 font-bold">{recentLiveDonations[0].donorName}</span>
+                    <span className="text-slate-300 font-mono text-xs">(${recentLiveDonations[0].amount.toFixed(2)} USD / ~{Math.round(toHtg(recentLiveDonations[0].amount)).toLocaleString()} HTG)</span>
+                    <span>pou</span>
+                    <span className="text-emerald-300 font-medium">"{recentLiveDonations[0].musicTitle}"</span>
+                    <span className="text-slate-400">({recentLiveDonations[0].artistName})</span>
+                  </h3>
+                ) : recentLiveArtists.length > 0 ? (
+                  <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-2 flex-wrap">
+                    <span>D√®nye enskripsyon atis:</span>
+                    <span className="text-purple-300 font-bold">{recentLiveArtists[0].stageName || recentLiveArtists[0].name}</span>
+                    <span className="text-slate-300 font-mono text-xs">({recentLiveArtists[0].city || 'Ayiti'} ‚Ä¢ $4.99 USD)</span>
+                  </h3>
+                ) : null}
+
                 <p className="text-xs text-slate-300 mt-0.5">
-                  Notifikasyon vizy√®l & son an aktive an tan rey√®l pou w pa janm rate yon nouvo sip√≤.
+                  Notifikasyon vizy√®l & son an aktif pandan w konekte k√≤m Administrat√®.
                 </p>
               </div>
             </div>
@@ -1722,18 +2204,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 )}
               </button>
 
-              <button
-                type="button"
-                id="admin-live-banner-validate-btn"
-                onClick={() => {
-                  setActiveTab('validations');
-                  setValidationCategoryFilter('donations');
-                }}
-                className="px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-300 hover:to-amber-300 text-slate-950 flex items-center gap-1.5 shadow-lg shadow-yellow-500/25 active:scale-95 transition-all"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Ale nan Validasyon Sip√≤</span>
-              </button>
+              {recentLiveDonations.length > 0 && (
+                <button
+                  type="button"
+                  id="admin-live-banner-validate-btn"
+                  onClick={() => {
+                    setActiveTab('validations');
+                    setValidationCategoryFilter('donations');
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-yellow-400 to-amber-400 hover:from-yellow-300 hover:to-amber-300 text-slate-950 flex items-center gap-1.5 shadow-lg shadow-yellow-500/25 active:scale-95 transition-all"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Validasyon Sip√≤</span>
+                </button>
+              )}
+
+              {recentLiveArtists.length > 0 && (
+                <button
+                  type="button"
+                  id="admin-live-banner-validate-artist-btn"
+                  onClick={() => {
+                    setActiveTab('validations');
+                    setValidationCategoryFilter('artists');
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-purple-400 to-indigo-400 hover:from-purple-300 hover:to-indigo-300 text-slate-950 flex items-center gap-1.5 shadow-lg shadow-purple-500/25 active:scale-95 transition-all"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Validasyon Atis</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -2092,6 +2591,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <span>Jere Pubs (3 Ads)</span>
         </button>
 
+        <button
+          id="admin-tab-social-posts"
+          onClick={() => setActiveTab('social_posts')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-2 transition-all ${activeTab === 'social_posts' ? 'bg-yellow-400 text-slate-950 shadow-lg shadow-yellow-400/20' : 'bg-[#0a0f1d] text-slate-300 hover:bg-white/[0.08] border border-white/[0.06]'}`}
+        >
+          <Share2 className="w-4 h-4 text-blue-400" />
+          <span>Moderasyon P√≤s Atis</span>
+        </button>
         <button
           id="admin-tab-payment-settings"
           onClick={() => setActiveTab('payment_settings')}
@@ -3997,6 +4504,78 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
 
+            {/* Bulk Selection and Batch Action Bar (Validasyon/Sispansyon an mas) */}
+            {displayedList.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-[#0a0f1d] border border-white/[0.08] p-3.5 rounded-2xl">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAllArtistsInList(displayedList)}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold bg-white/[0.05] hover:bg-white/[0.1] text-slate-200 border border-white/[0.08] transition-all"
+                  >
+                    {displayedList.length > 0 && displayedList.every(a => selectedArtistIds.includes(a.id)) ? (
+                      <>
+                        <CheckSquare className="w-4 h-4 text-yellow-400" />
+                        <span>Deseleksyone Tout ({displayedList.length})</span>
+                      </>
+                    ) : (
+                      <>
+                        <Square className="w-4 h-4 text-slate-400" />
+                        <span>Chwazi Tout ({displayedList.length})</span>
+                      </>
+                    )}
+                  </button>
+
+                  {selectedArtistIds.length > 0 && (
+                    <span className="text-xs font-bold text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 px-2.5 py-1 rounded-xl flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>{selectedArtistIds.length} atis chwazi</span>
+                    </span>
+                  )}
+                </div>
+
+                {selectedArtistIds.length > 0 && (
+                  <div className="flex items-center flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleBulkValidateSelectedArtists}
+                      className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md shadow-emerald-500/20 flex items-center gap-1.5 transition-all"
+                    >
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      <span>Valide Tout ({selectedArtistIds.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowBulkSuspendModal(true)}
+                      className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/20 flex items-center gap-1.5 transition-all"
+                    >
+                      <Ban className="w-3.5 h-3.5" />
+                      <span>Sispann Tout ({selectedArtistIds.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowBulkRejectModal(true)}
+                      className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 flex items-center gap-1.5 transition-all"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      <span>Refize Tout ({selectedArtistIds.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleClearArtistSelection}
+                      className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-white/[0.04] hover:bg-white/[0.08] text-slate-400 hover:text-white transition-all"
+                      title="Anile seleksyon an"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* List of Applications */}
             {displayedList.length === 0 ? (
               <div className="bg-[#0a0f1d] border border-white/[0.08] rounded-3xl p-12 text-center space-y-4">
@@ -4050,12 +4629,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   const isRejected = art.status === 'rejected';
                   const isSuspended = art.status === 'suspended';
                   const isActive = art.status === 'active' || !art.status;
+                  const isSelected = selectedArtistIds.includes(art.id);
 
                   return (
                     <div
                       key={art.id}
                       className={`bg-[#0a0f1d] border rounded-3xl p-5 md:p-6 transition-all backdrop-blur-xl shadow-lg space-y-4 ${
-                        isPending
+                        isSelected
+                          ? 'border-yellow-400 ring-2 ring-yellow-400/40 bg-yellow-950/10'
+                          : isPending
                           ? 'border-amber-500/40 hover:border-amber-400 shadow-amber-950/20'
                           : isRejected
                           ? 'border-red-500/30 hover:border-red-400 shadow-red-950/20'
@@ -4066,6 +4648,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
                         {/* Artist Identity & Avatar */}
                         <div className="flex items-start sm:items-center gap-4">
+                          {/* Selection Checkbox */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSelectArtist(art.id)}
+                            className={`p-1.5 rounded-xl transition-all shrink-0 ${
+                              isSelected
+                                ? 'bg-yellow-400 text-slate-950 shadow-md shadow-yellow-400/30'
+                                : 'bg-white/[0.04] text-slate-500 hover:text-white hover:bg-white/[0.08] border border-white/[0.08]'
+                            }`}
+                            title={isSelected ? 'Deseleksyone atis sa a' : 'Chwazi atis sa a pou aksyon an mas'}
+                          >
+                            {isSelected ? (
+                              <CheckSquare className="w-5 h-5" />
+                            ) : (
+                              <Square className="w-5 h-5" />
+                            )}
+                          </button>
+
                           {/* Avatar */}
                           <div className="relative shrink-0">
                             <img
@@ -4835,6 +5435,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
 
+            {/* Bulk Selection and Batch Action Bar for All Artists */}
+            <BulkArtistActionBar
+              selectedArtistIds={selectedArtistIds}
+              totalVisibleCount={sortedAndFilteredArtists.length}
+              isAllSelected={sortedAndFilteredArtists.length > 0 && sortedAndFilteredArtists.every((item) => selectedArtistIds.includes(item.artist.id))}
+              onToggleSelectAll={() => handleSelectAllArtistsInList(sortedAndFilteredArtists.map((item) => item.artist))}
+              onClearSelection={handleClearArtistSelection}
+              onBulkValidate={handleBulkValidateSelectedArtists}
+              onOpenBulkSuspend={() => setShowBulkSuspendModal(true)}
+              onBulkReactivate={handleBulkReactivateSelectedArtists}
+              showReject={false}
+              showReactivate={true}
+            />
+
             {/* List of Artists */}
             {sortedAndFilteredArtists.length === 0 ? (
               <div className="bg-[#0a0f1d]/90 border border-white/[0.08] rounded-3xl p-12 text-center text-slate-400 text-xs">
@@ -4866,6 +5480,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   const isActive = art.status === 'active' || !art.status;
                   const isRejected = art.status === 'rejected';
                   const isPaid = item.isPaid;
+                  const isSelected = selectedArtistIds.includes(art.id);
 
                   // Calculate remaining days for suspended artist
                   let suspensionDaysRemaining = 0;
@@ -4902,6 +5517,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-5">
                         {/* Artist Info & Ranking Badge */}
                         <div className="flex items-start gap-4 min-w-0">
+                          {/* Selection Checkbox for Bulk Actions */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSelectArtist(art.id)}
+                            className={`p-1.5 rounded-xl transition-all shrink-0 mt-1 sm:mt-2 cursor-pointer ${isSelected ? "bg-yellow-400 text-slate-950 shadow-md shadow-yellow-400/30 ring-1 ring-yellow-300" : "bg-white/[0.04] text-slate-500 hover:text-white hover:bg-white/[0.08] border border-white/[0.08]"}`}
+                            title={isSelected ? 'Deseleksyone atis sa a' : 'Chwazi atis sa a pou aksyon an mas'}
+                          >
+                            {isSelected ? (
+                              <CheckSquare className="w-5 h-5" />
+                            ) : (
+                              <Square className="w-5 h-5" />
+                            )}
+                          </button>
+
                           <div className="relative shrink-0">
                             <img
                               src={art.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80'}
@@ -6324,17 +6953,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-medium text-slate-300">Fichye Odyo (Audio Upload)</label>
+                  <label className="block text-xs font-medium text-slate-300">Fichye Odyo (MP3 / WAV s√®lman)</label>
                   {musicDuration > 0 && (
                     <span className="text-[10px] text-yellow-400 font-mono">Dire: {musicDuration}s</span>
                   )}
                 </div>
                 <input
                   type="file"
-                  accept="audio/*"
+                  accept=".mp3,.wav,audio/mpeg,audio/mp3,audio/wav,audio/x-wav"
                   onChange={async (e) => {
                     if (e.target.files && e.target.files[0]) {
                       const file = e.target.files[0];
+                      const isMp3 = file.type === 'audio/mpeg' || file.type === 'audio/mp3' || file.name.toLowerCase().endsWith('.mp3');
+                      const isWav = file.type === 'audio/wav' || file.type === 'audio/x-wav' || file.name.toLowerCase().endsWith('.wav');
+                      if (!isMp3 && !isWav) {
+                        alert('Tanpri chwazi yon fichye odyo MP3 oswa WAV s√®lman.');
+                        return;
+                      }
                       const audioKey = `audio_admin_${Date.now()}`;
                       await IdbStorage.saveMedia(audioKey, file);
                       setMusicAudioUrl(`idb:${audioKey}`);
@@ -7087,6 +7722,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             })}
           </div>
         </div>
+      )}
+
+      {/* VIEW: MODERASYON P√íS ATIS (UPMIZIK SOCIAL) */}
+      {activeTab === 'social_posts' && (
+        <AdminSocialModerationTab
+          currentAdmin={currentAdmin}
+          socialPosts={socialPosts}
+          artists={effectiveArtists}
+          musicList={musicList}
+          onPostDeleted={onDeleteSocialPost}
+        />
       )}
 
       {/* VIEW 8: ACHIV & RESET */}
@@ -9025,171 +9671,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="text"
                     value={manualArtistCity ?? ''}
-                    onChange={(e) => setManualArtistCity(e.target.value)}
-                    placeholder="Eg: Kap-Ayisyen, P√≤toprens, Jakm√®l..."
-                    className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs text-white outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">K√≤d PIN Sekirite (4 Chif)</label>
-                  <input
-                    type="text"
-                    maxLength={6}
-                    value={manualArtistPin ?? ''}
-                    onChange={(e) => setManualArtistPin(e.target.value)}
-                    placeholder="Eg: 1234"
-                    className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Status Selector */}
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Estati Demand lan</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setManualArtistStatus('pending')}
-                    className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${
-                      manualArtistStatus === 'pending'
-                        ? 'bg-amber-400 text-slate-950 border-amber-400 shadow'
-                        : 'bg-[#05070a] text-slate-300 border-white/[0.1]'
-                    }`}
-                  >
-                    üü° An Atant (Pou t√®s validasyon)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setManualArtistStatus('active')}
-                    className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${
-                      manualArtistStatus === 'active'
-                        ? 'bg-emerald-500 text-slate-950 border-emerald-500 shadow'
-                        : 'bg-[#05070a] text-slate-300 border-white/[0.1]'
-                    }`}
-                  >
-                    üü¢ Valide Dir√®kteman
-                  </button>
-                </div>
-              </div>
-
-              {/* Images */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Foto Pwofil (URL oswa Telechaje)</label>
-                  <input
-                    type="url"
-                    value={manualArtistAvatar ?? ''}
-                    onChange={(e) => setManualArtistAvatar(e.target.value)}
-                    placeholder="https://images.unsplash.com/..."
-                    className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs text-white outline-none mb-1.5"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const b64 = await compressAndReadFile(file, 800, 800, 0.85);
-                        setManualArtistAvatar(b64);
-                      }
-                    }}
-                    className="text-[10px] text-slate-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Pr√®v Peman $4.99 (URL oswa Telechaje)</label>
-                  <input
-                    type="url"
-                    value={manualArtistProof ?? ''}
-                    onChange={(e) => setManualArtistProof(e.target.value)}
-                    placeholder="https://images.unsplash.com/..."
-                    className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs text-white outline-none mb-1.5"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const b64 = await compressAndReadFile(file, 800, 800, 0.85);
-                        setManualArtistProof(b64);
-                      }
-                    }}
-                    className="text-[10px] text-slate-400"
-                  />
-                </div>
-              </div>
-
-              {/* Cultural & Bio details */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Rasin Mizikal & Estil</label>
-                  <input
-                    type="text"
-                    value={manualArtistRoots ?? ''}
-                    onChange={(e) => setManualArtistRoots(e.target.value)}
-                    placeholder="Eg: Rasin, Vodou Jazz, Rap Krey√≤l"
-                    className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs text-white outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">Enfliyans & Mod√®l</label>
-                  <input
-                    type="text"
-                    value={manualArtistInfluences ?? ''}
-                    onChange={(e) => setManualArtistInfluences(e.target.value)}
-                    placeholder="Eg: Boukman Eksperyans, RAM"
-                    className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs text-white outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Vizyon Atistik</label>
-                <input
-                  type="text"
-                  value={manualArtistVision ?? ''}
-                  onChange={(e) => setManualArtistVision(e.target.value)}
-                  placeholder="Eg: Valorize ritm zans√®t nou yo sou s√®n ent√®nasyonal"
-                  className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs text-white outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Biyografi Atis</label>
-                <textarea
-                  rows={2}
-                  value={manualArtistBio ?? ''}
-                  onChange={(e) => setManualArtistBio(e.target.value)}
-                  placeholder="Kout deskripsyon sou kary√® ak pakou atis la..."
-                  className="w-full bg-[#05070a] border border-white/[0.15] focus:border-amber-400 rounded-xl p-3 text-xs text-white outline-none resize-none"
-                />
-              </div>
-
-              <div className="pt-2 flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowAddManualArtistModal(false)}
-                  className="flex-1 py-3 rounded-xl text-xs font-bold bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] transition-all"
-                >
-                  Anile
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-3 rounded-xl text-xs font-black bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-300 hover:to-amber-400 text-slate-950 shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-all"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>Kreye Demand Enskripsyon</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
-};
+                    onChange={(e) => setManualAxúÏôQS€8Äﬂ˘;¥sÑéMHz-%tRJgZJ'CÔxaò©bÀâYÚH2âa¯-ùª'û˚ÚáÓ'‹⁄	ô ⁄‹MÛ`«≤¥ív?≠Vkeò6;Ã§%Z6Dµ©)üû–’Û%∞¸bN|⁄ë<†™æº€ﬁÑ=;çîÈîä5hæ+*Ù| ›hp¡ÀÂÚ≤Uíœâ÷üHDÎÀ='L8áV€9z‚’ºﬂ=r-©∞è—ÕÈuò°ÓëW^ØC(˝Doéﬁê®Ö◊™ÁÅíâh‡Ù9ƒ}g£\É8u*x3¥oúæﬁsI √ô†éêÇ⁄ÜÁnOnπ;Ÿ^ö.œãßElq“¢||ö-.˝Ó’hB)å”BMK4'Ü:8è®Â¨/oÔæ–|ˇ	>”.SŸòKUÿÈ∞puÀÕ%[˚d"NåU›&çqYWvsD§ˇëä∂È‘œû€MücQ?ãàHo®åõ&˙5¨¨ÿ[H±”!¢ççJtÍ€†©ŸøŸ¸Å‘≠W6™àUn”H
+9`÷¬â“3˜|6ƒ$Ò‡‘7R¡3wRwv2Á‰rWcøﬁR‰  ND!éY˜„›¥ ª8æ‰⁄©@]GeŸ q+1Fä[@V∞#ÄÿqÊwë:tCΩïVb*&⁄+»]¸ÏÀ»‡c$L+kñQDhfòAˆûûYÖgÀmrDPØ◊·jTÕ pµ!–◊xéÈeÕÉ)|uá≤W,o3ówΩ@&å>µPéÌ¢Œøÿ‘h≥-¿?ﬂæ˝CÑÅRS&`:s0, :ïb’∆Ñ;¥˘œ‚Ö¯Üù–√e4®¥–à*¬ßV»Àxç≈$Êo8Ã†ñ©¡E◊d˛Á^î‹”ΩæèHõÍØzã[[mNzπ™≈À=R‹N	Õûá“üAÍÅ?≤]¢Cæ“π¢áDq˚
+≤ÑçÇ˚<—¡P¬Ñé1±ﬁt]ñõ∞úçØußÏÀ»˝Ÿ·Ë¨`4∑bπv«ê·6C¨ Ò}õ˙rÆ&˜Y°o	≥ad™"?ÂK°d}BÆ,ó=Î◊Â#Ô¯UA;B)´µZ(˘RvÎyEìaK"<lh›¡%¡;êKYÉû7∫xÂµ’¢n°Ä9Ï§∞ç¿ÛY€Bz;GÎ^‹ø·2ï≈<Ä4—Õû@3Û≥¥Z~˘Úß∫ì¶í2úÎ¨ë	¯ÂL.øú…„;ì!rãÏK¨Öñ`h'·&¡ ~É7LB@a¸?ÕÏ≥S÷Õ'ÉáY∆'übÒaR=èÀ<0cíO}eÄ«≠‰ÙtãbÿS4|/√‚∆s‹!g)ﬂê£}.~HÔ±ÎÑ
+üŒE”µî"ıF&›,:ÿÌÍò™L»TcˇƒíµGdŸŸi*≥	⁄âuãSlEX›ï©C¶ôº%ô;¶a˚ªÄ4ÖûÎ•bß3ú"FÉ›T*A„üPañgáà’]-,`Sx˝@éﬁ∞T∂	YéR1GYc¢(±ËU…ûÆüUl¶¥pîÖÜﬂõ†=T>$∫´Xú¡ë”%*\ ÈBL∫¯LP:pRØ?*9Œ∆Ã(£Nƒ~z∆'D5‰¥ÿ]§◊N"ã∑6lÒVauV˙t:y˙π#{ç 7,ÓèÑóB¬µ›¢cœ∆åq".µç‘ˆµ-ºÁSi»é<°jsº“˙ÒD∫uz:∂≠ª!`Ÿ 
+Ûå3T©ìVƒ¨n˘æZ¿e–Õ‘Ä<`h_«HGA®d‰§îsŸ~ ê#2kWZØr≠´´äñœ
+√ú∞√€óˇÆD∫œ¬Ÿ◊˜≠0«ÆÚ ÌoÌt(ŒÚ∆≠BGX±ùEµÙÚ’Æ∏r[n˛˙Œ÷¥Ñ[n(U4^6QÈ∆#“æt£èÇÁØñ˛  ˇˇ ÖNß

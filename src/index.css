@@ -1,12 +1,34 @@
 @import "tailwindcss";
 
 @layer base {
+  html {
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior: none;
+    overscroll-behavior-y: none;
+    overflow-x: hidden;
+  }
+
   body {
     background-color: #05070a;
     color: #f1f5f9;
     font-family: 'Plus Jakarta Sans', sans-serif;
     overflow-x: hidden;
+    overscroll-behavior: none;
+    overscroll-behavior-y: none;
+    -webkit-overflow-scrolling: touch;
     transition: background-color 0.25s ease, color 0.25s ease;
+  }
+
+  button, a, input, select, textarea {
+    touch-action: manipulation;
+  }
+
+  /* Prevent auto-zooming on focus across iOS/Safari & Android mobile browsers */
+  @media screen and (max-width: 768px) {
+    input, select, textarea {
+      font-size: 16px !important;
+    }
   }
 }
 

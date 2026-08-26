@@ -25,9 +25,11 @@ import {
   Info,
   Download,
   Loader2,
-  FileText
+  FileText,
+  Users
 } from 'lucide-react';
 import { ArtistUser, MusicItem } from '../types';
+import { StorageService } from '../utils/storage';
 
 interface ArtistAnalyticsProps {
   currentArtist: ArtistUser;
@@ -122,6 +124,7 @@ export const ArtistAnalytics: React.FC<ArtistAnalyticsProps> = ({
     const periodListens = chartData.reduce((sum, d) => sum + d.dayListens, 0);
     const periodDonations = chartData.reduce((sum, d) => sum + d.dayDonations, 0);
     const avgDailyListens = Math.round(periodListens / chartData.length);
+    const periodUniqueListeners = StorageService.getArtistUniqueListenersCount(artistSongs);
 
     let peak = chartData[0];
     chartData.forEach(d => {
@@ -137,12 +140,13 @@ export const ArtistAnalytics: React.FC<ArtistAnalyticsProps> = ({
 
     return {
       periodListens,
+      periodUniqueListeners,
       periodDonations,
       avgDailyListens,
       peakDay: { date: peak.date, listens: peak.dayListens },
       growthRate
     };
-  }, [chartData]);
+  }, [chartData, artistSongs]);
 
   // Custom Recharts Tooltip styled to fit the dark aesthetic
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -309,10 +313,10 @@ export const ArtistAnalytics: React.FC<ArtistAnalyticsProps> = ({
       </div>
 
       {/* Snapshot KPI Metric Pills */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
         <div className="bg-[#05070a]/90 border border-white/[0.08] rounded-2xl p-3.5 backdrop-blur-md">
           <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-[11px] font-semibold uppercase">Koute nan {timeRange}J</span>
+            <span className="text-[11px] font-semibold uppercase">Ekout {timeRange}J</span>
             <Headphones className="w-3.5 h-3.5 text-cyan-400" />
           </div>
           <p className="text-xl font-black text-white font-mono">
@@ -326,7 +330,20 @@ export const ArtistAnalytics: React.FC<ArtistAnalyticsProps> = ({
 
         <div className="bg-[#05070a]/90 border border-white/[0.08] rounded-2xl p-3.5 backdrop-blur-md">
           <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-[11px] font-semibold uppercase">Sipò nan {timeRange}J</span>
+            <span className="text-[11px] font-semibold uppercase">Oditè Inik</span>
+            <Users className="w-3.5 h-3.5 text-indigo-400" />
+          </div>
+          <p className="text-xl font-black text-indigo-300 font-mono">
+            {stats.periodUniqueListeners.toLocaleString()}
+          </p>
+          <span className="text-[10px] text-indigo-400 font-semibold mt-0.5 block">
+            Reach reyèl verifye
+          </span>
+        </div>
+
+        <div className="bg-[#05070a]/90 border border-white/[0.08] rounded-2xl p-3.5 backdrop-blur-md">
+          <div className="flex items-center justify-between text-slate-400 mb-1">
+            <span className="text-[11px] font-semibold uppercase">Sipò {timeRange}J</span>
             <DollarSign className="w-3.5 h-3.5 text-yellow-400" />
           </div>
           <p className="text-xl font-black text-yellow-400 font-mono">

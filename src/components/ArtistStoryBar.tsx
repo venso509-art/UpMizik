@@ -23,6 +23,59 @@ export const ArtistStoryBar: React.FC<ArtistStoryBarProps> = ({
     return StorageService.getUserTopArtists(artists, musicList, 5);
   }, [artists, musicList]);
 
+  // Set of artist IDs that have a newly published song (within last 30 days or latest releases)
+  const artistsWithNewSongs = useMemo(() => {
+    const set = new Set<string>();
+    if (!musicList || musicList.length === 0) return set;
+    const now = Date.now();
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+    // 1. Check songs created in the last 30 days
+    musicList.forEach((song) => {
+      if (song.status === 'pending' || song.status === 'rejected') return;
+      let isRecent = false;
+      if (song.createdAt) {
+        const createdTime = new Date(song.createdAt).getTime();
+        if (!isNaN(createdTime) && (now - createdTime) <= THIRTY_DAYS_MS && createdTime <= (now + 86400000)) {
+          isRecent = true;
+        }
+      }
+      if (isRecent) {
+        if (song.artistId) set.add(song.artistId);
+        const matchingArtist = artists.find(
+          (a) =>
+            a.id === song.artistId ||
+            (a.stageName && a.stageName.trim().toLowerCase() === song.artistName?.trim().toLowerCase()) ||
+            (a.name && a.name.trim().toLowerCase() === song.artistName?.trim().toLowerCase())
+        );
+        if (matchingArtist) {
+          set.add(matchingArtist.id);
+        }
+      }
+    });
+
+    // 2. Fallback: If no songs are within 30 days, mark the artists of the top 3 most recently created active songs
+    if (set.size === 0 && musicList.length > 0) {
+      const sortedByDate = [...musicList]
+        .filter((s) => s.status !== 'pending' && s.status !== 'rejected')
+        .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+        .slice(0, 3);
+
+      sortedByDate.forEach((s) => {
+        if (s.artistId) set.add(s.artistId);
+        const matchingArtist = artists.find(
+          (a) =>
+            a.id === s.artistId ||
+            (a.stageName && a.stageName.trim().toLowerCase() === s.artistName?.trim().toLowerCase()) ||
+            (a.name && a.name.trim().toLowerCase() === s.artistName?.trim().toLowerCase())
+        );
+        if (matchingArtist) set.add(matchingArtist.id);
+      });
+    }
+
+    return set;
+  }, [musicList, artists]);
+
   const checkScroll = () => {
     if (scrollContainerRef.current) {
       const { scrollLeft, scrollWidth, clientWidth } = scrollContainerRef.current;
@@ -137,6 +190,7 @@ export const ArtistStoryBar: React.FC<ArtistStoryBarProps> = ({
           {topArtists.map((item, index) => {
             const { artist, isFromHistory, category } = item;
             const ringGradient = ringGradients[index % ringGradients.length];
+            const hasNewSong = artistsWithNewSongs.has(artist.id);
 
             return (
               <button
@@ -145,12 +199,23 @@ export const ArtistStoryBar: React.FC<ArtistStoryBarProps> = ({
                 type="button"
                 onClick={() => onOpenArtistProfile(artist.id)}
                 className="group flex flex-col items-center shrink-0 w-[74px] sm:w-[86px] cursor-pointer snap-start focus:outline-none transition-all active:scale-95 text-center"
-                title={`Klike pou wè pwofil konplè ${artist.stageName || artist.name}`}
+                title={`Klike pou wè pwofil konplè ${artist.stageName || artist.name}${hasNewSong ? ' (Gen yon nouvo mizik ki fèk pibliye)' : ''}`}
               >
                 {/* Avatar Story Ring */}
                 <div className="relative">
+                  {/* Gentle Breathing Pulse Glow / Aura for Artists with New Releases */}
+                  {hasNewSong && (
+                    <span className="absolute -inset-1 sm:-inset-1.5 rounded-full bg-gradient-to-tr from-yellow-400/40 via-amber-500/30 to-emerald-400/40 blur-[4px] animate-pulse pointer-events-none" />
+                  )}
+
                   {/* Glowing WhatsApp / Story status border ring */}
-                  <div className={`p-[2.5px] sm:p-[3px] rounded-full bg-gradient-to-tr ${ringGradient} shadow-lg shadow-emerald-950/30 group-hover:scale-105 group-hover:shadow-emerald-500/30 transition-all duration-300`}>
+                  <div
+                    className={`p-[2.5px] sm:p-[3px] rounded-full bg-gradient-to-tr ${ringGradient} shadow-lg shadow-emerald-950/30 group-hover:scale-105 group-hover:shadow-emerald-500/30 transition-all duration-300 ${
+                      hasNewSong
+                        ? 'ring-2 ring-yellow-400/90 ring-offset-2 ring-offset-[#05070a] shadow-yellow-500/30 animate-pulse'
+                        : ''
+                    }`}
+                  >
                     {/* Inner Dark Spacer for Clean Crisp Ring Separation */}
                     <div className="p-[2px] rounded-full bg-[#05070a]">
                       <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full overflow-hidden bg-slate-900 relative">
@@ -166,9 +231,27 @@ export const ArtistStoryBar: React.FC<ArtistStoryBarProps> = ({
                     </div>
                   </div>
 
-                  {/* Active / Online / Pulse Indicator Dot (WhatsApp Vibe) */}
+                  {/* Top-Right "Nouvo" Mini Badge with Sparkles for New Releases */}
+                  {hasNewSong && (
+                    <span
+                      className="absolute -top-1 -right-1 z-10 px-1.5 py-0.5 rounded-full bg-gradient-to-r from-yellow-400 to-amber-400 text-[8px] font-black text-slate-950 shadow-md shadow-yellow-500/40 uppercase tracking-tight animate-pulse flex items-center gap-0.5 border border-yellow-200/80"
+                      title="Atis sa a gen yon nouvo moso mizik ki fèk pibliye!"
+                    >
+                      <Sparkles className="w-2 h-2 text-slate-950" />
+                      <span>Nouvo</span>
+                    </span>
+                  )}
+
+                  {/* Active / Online / Pulse Indicator Dot */}
                   <span className="absolute bottom-0 right-0 translate-x-[2px] translate-y-[2px] w-4 h-4 rounded-full bg-[#05070a] flex items-center justify-center">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/80 animate-pulse" />
+                    {hasNewSong ? (
+                      <>
+                        <span className="absolute w-3 h-3 rounded-full bg-yellow-400/60 animate-ping" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-yellow-400 shadow-sm shadow-yellow-400/90" />
+                      </>
+                    ) : (
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/80 animate-pulse" />
+                    )}
                   </span>
                 </div>
 
@@ -180,7 +263,12 @@ export const ArtistStoryBar: React.FC<ArtistStoryBarProps> = ({
                   
                   {/* Subtle Sub-label */}
                   <span className="mt-0.5 inline-flex items-center gap-0.5 text-[9px] font-semibold text-slate-400 group-hover:text-emerald-300 transition-colors">
-                    {isFromHistory ? (
+                    {hasNewSong ? (
+                      <span className="inline-flex items-center gap-0.5 text-yellow-400 font-bold animate-pulse">
+                        <Sparkles className="w-2.5 h-2.5 text-yellow-400" />
+                        <span>Nouvo Moso</span>
+                      </span>
+                    ) : isFromHistory ? (
                       <>
                         <Headphones className="w-2.5 h-2.5 text-emerald-400" />
                         <span>Pi koute</span>

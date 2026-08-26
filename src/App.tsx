@@ -51,6 +51,45 @@ export default function App() {
   // Navigation & View state
   const [currentView, setCurrentView] = useState<ActiveView>('public');
 
+  // Enforce robust viewport meta tag & prevent accidental zoom on mobile clicks/inputs
+  useEffect(() => {
+    let meta = document.querySelector('meta[name="viewport"]') as HTMLMetaElement;
+    if (!meta) {
+      meta = document.createElement('meta');
+      meta.name = 'viewport';
+      document.head.appendChild(meta);
+    }
+    meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no, viewport-fit=cover';
+
+    // Prevent multi-touch gesture zoom and double-tap zoom
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length > 1) {
+        e.preventDefault();
+      }
+    };
+
+    let lastTouchEnd = 0;
+    const handleTouchEnd = (e: TouchEvent) => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 300) {
+        // Prevent double tap zoom
+        const target = e.target as HTMLElement;
+        if (target && (target.tagName === 'BUTTON' || target.tagName === 'INPUT' || target.tagName === 'A' || target.getAttribute('role') === 'button')) {
+          e.preventDefault();
+        }
+      }
+      lastTouchEnd = now;
+    };
+
+    document.addEventListener('touchstart', handleTouchStart, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd, { passive: false });
+
+    return () => {
+      document.removeEventListener('touchstart', handleTouchStart);
+      document.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, []);
+
   // Automatically scroll to the very top whenever the view or page changes
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
@@ -477,17 +516,17 @@ export default function App() {
       const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
       setPlaybackProgress(progressPercent);
 
-      // Listen count logic: Increment after 5 continuous seconds of listening
+      // Listen count logic: Increment after 5 continuous seconds of listening (Unique per user/device)
       if (currentTime >= 5 && !hasListened5s && currentTrack) {
         setHasListened5s(true);
         StorageService.addRecentListenedId(currentTrack.id);
-        const updatedSong = StorageService.incrementListenCount(currentTrack.id);
-        if (updatedSong) {
-          // Sync state
+        const wasIncremented = StorageService.incrementListenCount(currentTrack.id);
+        if (wasIncremented) {
+          // Sync state when a new unique listen is registered
           setMusicList(StorageService.getMusic());
           setArtists(StorageService.getArtists());
           setRecRefreshKey(prev => prev + 1);
-          addToast('info', `🎧 +1 Ekout pou "${currentTrack.title}"!`);
+          addToast('info', `🎧 +1 Ekout valide pou "${currentTrack.title}"!`);
         }
       }
     });
@@ -822,6 +861,14 @@ export default function App() {
     addToast('info', 'Moso mizik la efase.');
   };
 
+  const handleDeleteSocialPost = (postId: string) => {
+    const actorName = currentAdmin?.name || currentArtist?.stageName || 'Administratè';
+    StorageService.deleteSocialPost(postId, actorName);
+    FirebaseService.deleteSinglePost(postId).catch(() => {});
+    setSocialPosts(prev => prev.filter(p => p.id !== postId));
+    addToast('success', 'Pòs atis la siprime avèk siksè!');
+  };
+
   const handleSaveTop3Override = (override: { enabled: boolean; topIds: string[] }) => {
     StorageService.saveTop3Override(override);
     setTop3Override(override);
@@ -1148,6 +1195,7 @@ export default function App() {
                 onOpenSupport={(m) => setMusicToSupport(m)}
                 onOpenArtistProfile={handleOpenArtistProfile}
                 onShare={handleShare}
+                onOpenArtistAuth={() => setShowArtistAuth(true)}
               />
             </div>
 
@@ -1170,6 +1218,7 @@ export default function App() {
                 onPlayToggle={handlePlayToggle}
                 onOpenSupport={(m) => setMusicToSupport(m)}
                 onOpenArtistProfile={handleOpenArtistProfile}
+                onOpenArtistAuth={() => setShowArtistAuth(true)}
               />
             </div>
 
@@ -1238,10 +1287,12 @@ export default function App() {
                 currentArtist={currentArtist}
                 currentPlayingId={currentTrack?.id || null}
                 isPlaying={isPlaying}
+                isAdmin={Boolean(currentAdmin)}
                 onPlayToggle={handlePlayToggle}
                 onOpenSupport={(m) => setMusicToSupport(m)}
                 onOpenArtistProfile={handleOpenArtistProfile}
                 onShare={handleShare}
+                onDeletePost={handleDeleteSocialPost}
                 onNewPostAdded={(newPost) => {
                   setSocialPosts(StorageService.getSocialPosts());
                   addToast('success', 'UpMizik Social mete ajou avèk siksè!');
@@ -1266,10 +1317,12 @@ export default function App() {
               currentArtist={currentArtist}
               currentPlayingId={currentTrack?.id || null}
               isPlaying={isPlaying}
+              isAdmin={Boolean(currentAdmin)}
               onPlayToggle={handlePlayToggle}
               onOpenSupport={(m) => setMusicToSupport(m)}
               onOpenArtistProfile={handleOpenArtistProfile}
               onShare={handleShare}
+              onDeletePost={handleDeleteSocialPost}
               onNewPostAdded={(newPost) => {
                 setSocialPosts(prev => [newPost, ...prev]);
                 addToast('success', 'Nouvo pòs ou an pibliye avèk siksè sou UpMizik Social!');
@@ -1311,6 +1364,7 @@ export default function App() {
             pubs={pubs}
             rpaList={rpaList}
             archives={archives}
+            socialPosts={socialPosts}
             top3Override={top3Override}
             onSaveTop3Override={handleSaveTop3Override}
             onValidateDonation={handleValidateDonation}
@@ -1318,6 +1372,7 @@ export default function App() {
             onSuspendArtist={handleSuspendArtist}
             onReactivateArtist={handleReactivateArtist}
             onDeleteArtist={handleDeleteArtist}
+            onDeleteSocialPost={handleDeleteSocialPost}
             onToggleArtistPaymentStatus={handleToggleArtistPaymentStatus}
             onSaveMusicItem={handleSaveMusicItem}
             onDeleteMusicItem={handleDeleteMusicItem}

@@ -328,8 +328,9 @@ export const ArtistDashboard: React.FC<ArtistDashboardProps> = ({
     (a) => a.id !== currentArtist.id && (a.status === 'active' || !a.status)
   );
 
-  // Financial aggregates
+  // Financial & analytics aggregates
   const totalArtistListens = artistSongs.reduce((acc, s) => acc + (s.listens || 0), 0);
+  const totalArtistUniqueListeners = StorageService.getArtistUniqueListenersCount(artistSongs);
   const totalArtistGross = artistSongs.reduce((acc, s) => acc + (s.totalDonations || 0), 0);
   const totalArtistNet85 = (totalArtistGross * 0.85).toFixed(2);
   const totalAdminCut15 = (totalArtistGross * 0.15).toFixed(2);
@@ -359,6 +360,13 @@ export const ArtistDashboard: React.FC<ArtistDashboardProps> = ({
     }
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      const isMp3 = file.type === 'audio/mpeg' || file.type === 'audio/mp3' || file.name.toLowerCase().endsWith('.mp3');
+      const isWav = file.type === 'audio/wav' || file.type === 'audio/x-wav' || file.name.toLowerCase().endsWith('.wav');
+      if (!isMp3 && !isWav) {
+        setAddSongError('Tanpri chwazi yon fichye odyo MP3 oswa WAV sèlman.');
+        return;
+      }
+      setAddSongError(null);
       const audioKey = `audio_artist_${currentArtist.id}_${Date.now()}`;
       await IdbStorage.saveMedia(audioKey, file);
       setAudioPreview(`idb:${audioKey}`);
@@ -558,6 +566,13 @@ export const ArtistDashboard: React.FC<ArtistDashboardProps> = ({
     }
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      const isMp3 = file.type === 'audio/mpeg' || file.type === 'audio/mp3' || file.name.toLowerCase().endsWith('.mp3');
+      const isWav = file.type === 'audio/wav' || file.type === 'audio/x-wav' || file.name.toLowerCase().endsWith('.wav');
+      if (!isMp3 && !isWav) {
+        setEditSongError('Tanpri chwazi yon fichye odyo MP3 oswa WAV sèlman.');
+        return;
+      }
+      setEditSongError(null);
       const audioKey = `audio_artist_${currentArtist.id}_${Date.now()}`;
       await IdbStorage.saveMedia(audioKey, file);
       setEditAudioPreview(`idb:${audioKey}`);
@@ -1359,7 +1374,7 @@ export const ArtistDashboard: React.FC<ArtistDashboardProps> = ({
       {activeTab === 'overview' && (
         <>
           {/* Revenue & Statistics Overview (85% Net Calculation) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
             {/* Net 85% Cut */}
             <div
               onClick={() => setActiveTab('revenue')}
@@ -1379,7 +1394,7 @@ export const ArtistDashboard: React.FC<ArtistDashboardProps> = ({
               </p>
               <p className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
                 <span className="flex items-center gap-1"><Calendar className="w-3 h-3 text-yellow-400" /> Règleman: 1ye nan mwa a</span>
-                <span className="text-emerald-400 text-[10px] font-bold group-hover:underline">Wè Tablo Revni →</span>
+                <span className="text-emerald-400 text-[10px] font-bold group-hover:underline">Revni →</span>
               </p>
             </div>
 
@@ -1402,14 +1417,18 @@ export const ArtistDashboard: React.FC<ArtistDashboardProps> = ({
               </p>
               <p className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
                 <span>Platfòm (15%): ${totalAdminCut15}</span>
-                <span className="text-yellow-400 text-[10px] font-bold group-hover:underline">Kalkil Mwa →</span>
+                <span className="text-yellow-400 text-[10px] font-bold group-hover:underline">Kalkil →</span>
               </p>
             </div>
 
             {/* Total Listens */}
-            <div className="bg-[#0a0f1d]/90 border border-white/[0.08] p-5 rounded-2xl backdrop-blur-xl">
+            <div 
+              onClick={() => setActiveTab('analytics')}
+              className="bg-[#0a0f1d]/90 border border-white/[0.08] hover:border-blue-400/40 p-5 rounded-2xl backdrop-blur-xl cursor-pointer group transition-all"
+              title="Klike pou wè analiz ekout yo"
+            >
               <div className="flex items-center justify-between text-slate-400 mb-2">
-                <span className="text-xs font-bold uppercase tracking-wider">Total Ekout</span>
+                <span className="text-xs font-bold uppercase tracking-wider group-hover:text-blue-400 transition-colors">Total Ekout</span>
                 <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center">
                   <TrendingUp className="w-4 h-4" />
                 </div>
@@ -1417,8 +1436,36 @@ export const ArtistDashboard: React.FC<ArtistDashboardProps> = ({
               <p className="text-2xl sm:text-3xl font-black text-white font-mono">
                 {totalArtistListens.toLocaleString()}
               </p>
-              <p className="text-[11px] text-slate-400 mt-1">
-                Chak 5s konte kòm 1 ekout reyèl
+              <p className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
+                <span>Chak 5s = 1 ekout</span>
+                <span className="text-blue-400 text-[10px] font-bold group-hover:underline">Grafik →</span>
+              </p>
+            </div>
+
+            {/* Unique Listeners / Oditè Inik (Real Reach) */}
+            <div
+              onClick={() => setActiveTab('analytics')}
+              className="bg-[#0a0f1d]/90 border border-white/[0.08] hover:border-indigo-400/40 p-5 rounded-2xl backdrop-blur-xl cursor-pointer group transition-all"
+              title="Klike pou wè analiz detaye sou rive reyèl (reach) odyans ou"
+            >
+              <div className="flex items-center justify-between text-slate-400 mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider group-hover:text-indigo-400 transition-colors">
+                  Oditè Inik
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                  <Users className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-2xl sm:text-3xl font-black text-indigo-400 font-mono">
+                {totalArtistUniqueListeners.toLocaleString()}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
+                <span>
+                  {totalArtistListens > 0
+                    ? `${Math.min(100, Math.round((totalArtistUniqueListeners / totalArtistListens) * 100))}% rive reyèl`
+                    : 'Moun reyèl ki koute'}
+                </span>
+                <span className="text-indigo-400 text-[10px] font-bold group-hover:underline">Reach →</span>
               </p>
             </div>
 
@@ -1640,12 +1687,13 @@ export const ArtistDashboard: React.FC<ArtistDashboardProps> = ({
                   <th className="px-4 py-3.5 text-yellow-400 font-black">Nimewo</th>
                   <th className="px-5 py-3.5">Moso / Tit & Estati</th>
                   <th className="px-5 py-3.5">Kategori</th>
-                  <th className="px-5 py-3.5">Ekout</th>
-                  <th className="px-5 py-3.5 text-cyan-400">Pataj</th>
-                  <th className="px-5 py-3.5">Total Sipò</th>
-                  <th className="px-5 py-3.5 text-emerald-400 font-bold">Pati Atis (85%)</th>
-                  <th className="px-5 py-3.5 text-slate-400">Pati UpMizik (15%)</th>
-                  <th className="px-5 py-3.5 text-right">Aksyon</th>
+                  <th className="px-4 py-3.5">Ekout</th>
+                  <th className="px-4 py-3.5 text-indigo-400 font-bold">Oditè Inik</th>
+                  <th className="px-4 py-3.5 text-cyan-400">Pataj</th>
+                  <th className="px-4 py-3.5">Total Sipò</th>
+                  <th className="px-4 py-3.5 text-emerald-400 font-bold">Pati Atis (85%)</th>
+                  <th className="px-4 py-3.5 text-slate-400">Pati UpMizik (15%)</th>
+                  <th className="px-4 py-3.5 text-right">Aksyon</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/[0.06]">
@@ -1753,19 +1801,28 @@ export const ArtistDashboard: React.FC<ArtistDashboardProps> = ({
                             {song.category}
                           </span>
                         </td>
-                        <td className="px-5 py-3.5 font-mono font-bold text-white">
+                        <td className="px-4 py-3.5 font-mono font-bold text-white">
                           {song.listens.toLocaleString()}
                         </td>
-                        <td className="px-5 py-3.5 font-mono text-cyan-400 font-semibold">
+                        <td className="px-4 py-3.5">
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-mono font-bold text-xs"
+                            title="Kantite itilizatè inik ki koute moso sa a (reach reyèl)"
+                          >
+                            <Users className="w-3 h-3 text-indigo-400" />
+                            {StorageService.getSongUniqueListenersCount(song.id, song.listens).toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 font-mono text-cyan-400 font-semibold">
                           {(song.sharesCount || 0).toLocaleString()}
                         </td>
-                        <td className="px-5 py-3.5 font-mono font-bold text-yellow-400">
+                        <td className="px-4 py-3.5 font-mono font-bold text-yellow-400">
                           ${song.totalDonations.toFixed(2)}
                         </td>
-                        <td className="px-5 py-3.5 font-mono font-black text-emerald-400 text-sm">
+                        <td className="px-4 py-3.5 font-mono font-black text-emerald-400 text-sm">
                           ${cut85}
                         </td>
-                        <td className="px-5 py-3.5 font-mono text-slate-400">
+                        <td className="px-4 py-3.5 font-mono text-slate-400">
                           ${cut15}
                         </td>
                         <td className="px-5 py-3.5 text-right">
@@ -2142,13 +2199,21 @@ export const ArtistDashboard: React.FC<ArtistDashboardProps> = ({
 
               {/* Audio Upload */}
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Fichye Odyo (MP3/WAV)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-slate-300">Fichye Odyo (MP3 / WAV)</label>
+                  {duration > 0 && (
+                    <span className="text-[10px] text-yellow-400 font-mono">Dire: {duration}s</span>
+                  )}
+                </div>
                 <input
                   type="file"
-                  accept="audio/*"
+                  accept=".mp3,.wav,audio/mpeg,audio/mp3,audio/wav,audio/x-wav"
                   onChange={handleAudioUpload}
-                  className="text-xs text-slate-400 file:py-1.5 file:px-3 file:rounded-xl file:bg-white/[0.08] file:text-white file:border-0 hover:file:bg-white/[0.12] cursor-pointer"
+                  className="w-full text-xs text-slate-400 file:py-1.5 file:px-3 file:rounded-xl file:bg-white/[0.08] file:text-white file:border-0 hover:file:bg-white/[0.12] cursor-pointer"
                 />
+                {audioPreview && (
+                  <p className="text-[10px] text-emerald-400 mt-1">✓ Fichye odyo pare pou piblikasyon.</p>
+                )}
               </div>
 
               {/* Social Links */}
@@ -2500,9 +2565,9 @@ export const ArtistDashboard: React.FC<ArtistDashboardProps> = ({
                 </div>
                 <input
                   type="file"
-                  accept="audio/*"
+                  accept=".mp3,.wav,audio/mpeg,audio/mp3,audio/wav,audio/x-wav"
                   onChange={handleEditAudioUpload}
-                  className="text-xs text-slate-400 file:py-1.5 file:px-3 file:rounded-xl file:bg-white/[0.08] file:text-white file:border-0 hover:file:bg-white/[0.12] cursor-pointer"
+                  className="w-full text-xs text-slate-400 file:py-1.5 file:px-3 file:rounded-xl file:bg-white/[0.08] file:text-white file:border-0 hover:file:bg-white/[0.12] cursor-pointer"
                 />
                 {editAudioPreview && (
                   <p className="text-[10px] text-emerald-400 mt-1">✓ Fichye odyo pare pou jwe.</p>

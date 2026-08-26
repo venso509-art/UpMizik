@@ -7,11 +7,16 @@ const DB_VERSION = 1;
 const STORE_MEDIA = 'media';
 const STORE_COLLECTIONS = 'collections';
 
+let dbInstance: IDBDatabase | null = null;
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function openDB(): Promise<IDBDatabase> {
   if (typeof window === 'undefined' || !window.indexedDB) {
     return Promise.reject(new Error('IndexedDB is not supported in this environment'));
+  }
+
+  if (dbInstance) {
+    return Promise.resolve(dbInstance);
   }
 
   if (dbPromise) {
@@ -34,14 +39,36 @@ function openDB(): Promise<IDBDatabase> {
 
       request.onsuccess = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
+        dbInstance = db;
+        db.onclose = () => {
+          dbInstance = null;
+          dbPromise = null;
+        };
+        db.onversionchange = () => {
+          try {
+            db.close();
+          } catch {
+            // silent
+          }
+          dbInstance = null;
+          dbPromise = null;
+        };
         resolve(db);
       };
 
       request.onerror = (event) => {
-        console.error('IndexedDB open error:', (event.target as IDBOpenDBRequest).error);
+        dbInstance = null;
+        dbPromise = null;
+        console.warn('IndexedDB open error:', (event.target as IDBOpenDBRequest).error);
         reject((event.target as IDBOpenDBRequest).error);
       };
+      request.onblocked = () => {
+        dbInstance = null;
+        dbPromise = null;
+      };
     } catch (err) {
+      dbInstance = null;
+      dbPromise = null;
       reject(err);
     }
   });
@@ -52,19 +79,41 @@ function openDB(): Promise<IDBDatabase> {
 // In-memory cache for fast blob URLs
 const objectUrlCache = new Map<string, string>();
 
+async function getValidDB(): Promise<IDBDatabase> {
+  try {
+    const db = await openDB();
+    return db;
+  } catch {
+    dbInstance = null;
+    dbPromise = null;
+    return openDB();
+  }
+}
+
 export const IdbStorage = {
   /**
    * Save a blob, file, or data string to IndexedDB
    */
   saveMedia: async (key: string, data: Blob | File | string): Promise<void> => {
     try {
-      const db = await openDB();
+      const db = await getValidDB();
       return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_MEDIA, 'readwrite');
-        const store = tx.objectStore(STORE_MEDIA);
-        const req = store.put(data, key);
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
+        try {
+          const tx = db.transaction(STORE_MEDIA, 'readwrite');
+          tx.onerror = () => {
+            dbInstance = null;
+            dbPromise = null;
+            reject(tx.error);
+          };
+          const store = tx.objectStore(STORE_MEDIA);
+          const req = store.put(data, key);
+          req.onsuccess = () => resolve();
+          req.onerror = () => reject(req.error);
+        } catch (e) {
+          dbInstance = null;
+          dbPromise = null;
+          resolve();
+        }
       });
     } catch {
       // Fallback silently if storage unavailable
@@ -76,13 +125,24 @@ export const IdbStorage = {
    */
   getMedia: async (key: string): Promise<Blob | File | string | null> => {
     try {
-      const db = await openDB();
+      const db = await getValidDB();
       return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_MEDIA, 'readonly');
-        const store = tx.objectStore(STORE_MEDIA);
-        const req = store.get(key);
-        req.onsuccess = () => resolve(req.result || null);
-        req.onerror = () => reject(req.error);
+        try {
+          const tx = db.transaction(STORE_MEDIA, 'readonly');
+          tx.onerror = () => {
+            dbInstance = null;
+            dbPromise = null;
+            reject(tx.error);
+          };
+          const store = tx.objectStore(STORE_MEDIA);
+          const req = store.get(key);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => reject(req.error);
+        } catch {
+          dbInstance = null;
+          dbPromise = null;
+          resolve(null);
+        }
       });
     } catch {
       return null;
@@ -94,18 +154,33 @@ export const IdbStorage = {
    */
   deleteMedia: async (key: string): Promise<void> => {
     try {
-      const db = await openDB();
+      const db = await getValidDB();
       // Revoke any cached blob URL
       if (objectUrlCache.has(key)) {
-        URL.revokeObjectURL(objectUrlCache.get(key)!);
+        try {
+          URL.revokeObjectURL(objectUrlCache.get(key)!);
+        } catch {
+          // ignore
+        }
         objectUrlCache.delete(key);
       }
       return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_MEDIA, 'readwrite');
-        const store = tx.objectStore(STORE_MEDIA);
-        const req = store.delete(key);
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
+        try {
+          const tx = db.transaction(STORE_MEDIA, 'readwrite');
+          tx.onerror = () => {
+            dbInstance = null;
+            dbPromise = null;
+            reject(tx.error);
+          };
+          const store = tx.objectStore(STORE_MEDIA);
+          const req = store.delete(key);
+          req.onsuccess = () => resolve();
+          req.onerror = () => reject(req.error);
+        } catch {
+          dbInstance = null;
+          dbPromise = null;
+          resolve();
+        }
       });
     } catch {
       // Fallback silently
@@ -146,13 +221,24 @@ export const IdbStorage = {
    */
   saveCollectionBackup: async <T>(key: string, data: T): Promise<void> => {
     try {
-      const db = await openDB();
+      const db = await getValidDB();
       return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_COLLECTIONS, 'readwrite');
-        const store = tx.objectStore(STORE_COLLECTIONS);
-        const req = store.put(data, key);
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
+        try {
+          const tx = db.transaction(STORE_COLLECTIONS, 'readwrite');
+          tx.onerror = () => {
+            dbInstance = null;
+            dbPromise = null;
+            reject(tx.error);
+          };
+          const store = tx.objectStore(STORE_COLLECTIONS);
+          const req = store.put(data, key);
+          req.onsuccess = () => resolve();
+          req.onerror = () => reject(req.error);
+        } catch {
+          dbInstance = null;
+          dbPromise = null;
+          resolve();
+        }
       });
     } catch {
       // Fallback silently
@@ -164,13 +250,24 @@ export const IdbStorage = {
    */
   getCollectionBackup: async <T>(key: string): Promise<T | null> => {
     try {
-      const db = await openDB();
+      const db = await getValidDB();
       return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_COLLECTIONS, 'readonly');
-        const store = tx.objectStore(STORE_COLLECTIONS);
-        const req = store.get(key);
-        req.onsuccess = () => resolve(req.result || null);
-        req.onerror = () => reject(req.error);
+        try {
+          const tx = db.transaction(STORE_COLLECTIONS, 'readonly');
+          tx.onerror = () => {
+            dbInstance = null;
+            dbPromise = null;
+            reject(tx.error);
+          };
+          const store = tx.objectStore(STORE_COLLECTIONS);
+          const req = store.get(key);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => reject(req.error);
+        } catch {
+          dbInstance = null;
+          dbPromise = null;
+          resolve(null);
+        }
       });
     } catch {
       return null;

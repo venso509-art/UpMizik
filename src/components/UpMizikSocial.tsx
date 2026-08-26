@@ -33,6 +33,7 @@ import { ArtistBadge } from './ArtistBadge';
 import { getArtistBadgeInfo, calculateArtistTotalDonations } from '../utils/badgeSystem';
 import { SocialCommentModal } from './SocialCommentModal';
 import { SocialPostShareModal } from './SocialPostShareModal';
+import { FirebaseService } from '../utils/firebase';
 
 interface UpMizikSocialProps {
   posts: SocialPost[];
@@ -41,11 +42,13 @@ interface UpMizikSocialProps {
   currentArtist: ArtistUser | null;
   currentPlayingId: string | null;
   isPlaying: boolean;
+  isAdmin?: boolean;
   onPlayToggle: (music: MusicItem) => void;
   onOpenSupport: (music: MusicItem) => void;
   onOpenArtistProfile: (artistId: string) => void;
   onShare: (music: MusicItem) => void;
   onNewPostAdded?: (newPost: SocialPost) => void;
+  onDeletePost?: (postId: string) => void;
 }
 
 export const UpMizikSocial: React.FC<UpMizikSocialProps> = ({
@@ -55,11 +58,13 @@ export const UpMizikSocial: React.FC<UpMizikSocialProps> = ({
   currentArtist,
   currentPlayingId,
   isPlaying,
+  isAdmin = false,
   onPlayToggle,
   onOpenSupport,
   onOpenArtistProfile,
   onShare,
-  onNewPostAdded
+  onNewPostAdded,
+  onDeletePost
 }) => {
   // Filters State
   const [selectedPlatform, setSelectedPlatform] = useState<'all' | 'twitter' | 'instagram'>('all');
@@ -72,6 +77,8 @@ export const UpMizikSocial: React.FC<UpMizikSocialProps> = ({
   // Modals for post comments and sharing
   const [commentingPost, setCommentingPost] = useState<SocialPost | null>(null);
   const [sharingPost, setSharingPost] = useState<SocialPost | null>(null);
+  const [postToDelete, setPostToDelete] = useState<SocialPost | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   // Helper for 30-day post lifespan
   const getPostRemainingLifespan = (post: SocialPost) => {
@@ -774,8 +781,21 @@ export const UpMizikSocial: React.FC<UpMizikSocialProps> = ({
                         </div>
                       </div>
 
-                      {/* Platform Icon Badge & Direct Link */}
+                      {/* Platform Icon Badge, Direct Link & Admin Delete Action */}
                       <div className="shrink-0 flex items-center gap-1.5">
+                        {/* Admin or Author Delete Button */}
+                        {(isAdmin || (currentArtist && currentArtist.id === post.artistId)) && (
+                          <button
+                            type="button"
+                            onClick={() => setPostToDelete(post)}
+                            title={isAdmin ? "Siprime pòs sa a (Aksyon Administratè)" : "Siprime pòs sa a"}
+                            className="p-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1 border bg-red-500/10 hover:bg-red-600 text-red-400 hover:text-white border-red-500/25 shrink-0 group/del shadow-sm active:scale-95"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline text-[11px] font-semibold">Siprime</span>
+                          </button>
+                        )}
+
                         <a
                           href={post.postUrl}
                           target="_blank"
@@ -1000,6 +1020,82 @@ export const UpMizikSocial: React.FC<UpMizikSocialProps> = ({
           }
         }}
       />
+
+      {/* Delete Confirmation Modal */}
+      {postToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-[#0b1120] border border-red-500/30 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400 mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-1.5">
+              <h3 className="text-lg font-bold text-white">Siprime Pòs Sa a?</h3>
+              <p className="text-xs text-slate-400">
+                {isAdmin
+                  ? 'Kòm Administratè, ou gen otorite pou siprime piblikasyon sa a imedyatman sou UpMizik Social menm si limit 30 jou a poko rive.'
+                  : 'Èske w sèten ou vle siprime piblikasyon sa a sou kont ou?'}
+              </p>
+            </div>
+
+            {/* Post Summary Preview */}
+            <div className="p-3.5 bg-black/40 border border-white/[0.08] rounded-2xl text-xs space-y-1.5">
+              <div className="flex items-center justify-between text-slate-300 font-bold">
+                <span>{postToDelete.stageName}</span>
+                <span className="text-[10px] text-slate-500 font-mono font-normal">{postToDelete.handle}</span>
+              </div>
+              <p className="text-slate-400 text-xs line-clamp-2 italic">
+                "{postToDelete.content}"
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setPostToDelete(null)}
+                disabled={isDeleting}
+                className="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 transition-colors border border-white/10"
+              >
+                Anile
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={async () => {
+                  if (!postToDelete) return;
+                  setIsDeleting(true);
+                  try {
+                    const actor = isAdmin ? 'Administratè' : (currentArtist?.stageName || 'Atis');
+                    StorageService.deleteSocialPost(postToDelete.id, actor);
+                    await FirebaseService.deleteSinglePost(postToDelete.id).catch(() => {});
+                    if (onDeletePost) {
+                      onDeletePost(postToDelete.id);
+                    }
+                    setPostToDelete(null);
+                  } catch (e) {
+                    console.error(e);
+                  } finally {
+                    setIsDeleting(false);
+                  }
+                }}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white shadow-lg shadow-red-600/30 flex items-center justify-center gap-1.5 transition-all"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Ap siprime...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Wi, Siprime Pòs la</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </section>
   );

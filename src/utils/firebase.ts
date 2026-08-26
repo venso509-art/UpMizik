@@ -401,6 +401,14 @@ export const FirebaseService = {
     }
   },
 
+  async deleteSinglePost(postId: string) {
+    try {
+      await deleteDoc(doc(db, 'social_posts', postId));
+    } catch (e) {
+      handleFirestoreError(e, OperationType.DELETE, `social_posts/${postId}`);
+    }
+  },
+
   // ==========================================
   // SOCIAL COMMENTS (Collection: 'social_comments')
   // ==========================================
@@ -450,6 +458,27 @@ export const FirebaseService = {
       }
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, 'archives');
+    }
+  },
+
+  // ==========================================
+  // PURGE ALL CLOUD COLLECTIONS (FOR ADMIN RESET)
+  // ==========================================
+  async clearAllCollections() {
+    try {
+      const collectionsToClear = ['music', 'artists', 'social_posts', 'social_comments', 'donations', 'archives', 'artist_inbox'];
+      for (const colName of collectionsToClear) {
+        try {
+          const snap = await getDocs(collection(db, colName));
+          for (const d of snap.docs) {
+            await deleteDoc(d.ref);
+          }
+        } catch (colErr) {
+          console.warn(`Could not clear collection ${colName}:`, colErr);
+        }
+      }
+    } catch (e) {
+      console.warn('Error clearing cloud collections:', e);
     }
   }
 };

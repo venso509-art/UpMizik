@@ -34,6 +34,7 @@ interface ArtistLeaderboardProps {
   onPlayToggle: (music: MusicItem) => void;
   onOpenSupport: (music: MusicItem) => void;
   onOpenArtistProfile: (artist: ArtistUser) => void;
+  onOpenArtistAuth?: () => void;
 }
 
 export interface RankedArtist {
@@ -54,7 +55,8 @@ export const ArtistLeaderboard: React.FC<ArtistLeaderboardProps> = ({
   isPlaying,
   onPlayToggle,
   onOpenSupport,
-  onOpenArtistProfile
+  onOpenArtistProfile,
+  onOpenArtistAuth
 }) => {
   const [selectedGenre, setSelectedGenre] = useState<string>('Tout');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -181,255 +183,323 @@ export const ArtistLeaderboard: React.FC<ArtistLeaderboardProps> = ({
         </div>
       </div>
 
-      {/* Podium Top 3 Visual Cards (Responsive 3-Column Layout) */}
-      {rankedArtists.length >= 3 && top1?.artist && top2?.artist && top3?.artist && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 pt-2">
-          {/* #2 Rank - Silver */}
-          {top2?.artist && (
-            <div className="order-2 md:order-1 relative bg-gradient-to-b from-slate-900/90 via-[#0a0f1d]/95 to-[#05070a] border border-slate-400/30 rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-2xl backdrop-blur-2xl group hover:border-slate-300/50 transition-all duration-300">
-              <div className="absolute -top-3.5 left-6 px-3 py-1 rounded-full bg-slate-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg border border-white">
-                <Medal className="w-3.5 h-3.5 text-slate-800" />
-                <span>#2 Top Atis</span>
-              </div>
-
-              <div>
-                <div className="flex items-center gap-4 mt-2 mb-4">
-                  <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden border-2 border-slate-300 shadow-md shrink-0 bg-black">
-                    <img src={top2.artist.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80'} alt={top2.artist.stageName} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="text-lg sm:text-xl font-black text-white truncate flex items-center gap-1.5 flex-wrap">
-                      <span>{top2.artist.stageName}</span>
-                      <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
-                      <ArtistBadge donations={top2.cumulativeDonations} size="xs" />
-                    </h3>
-                    <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-0.5">
-                      <MapPin className="w-3 h-3 text-slate-300" />
-                      <span className="truncate">{top2.artist.city || 'Ayiti'}</span>
-                    </div>
-                    <span className="inline-block text-[10px] font-bold text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded-md mt-1.5 border border-slate-700">
-                      {top2.primaryGenre}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="bg-[#05070a]/90 border border-white/[0.08] rounded-2xl p-3.5 mb-4 grid grid-cols-2 gap-2 text-center">
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Nivo Kominotè</span>
-                    <span className="text-xs sm:text-sm font-black text-yellow-400">
-                      {getArtistBadgeInfo(top2.artist, musicList).label}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Ekout</span>
-                    <span className="text-lg font-black text-white font-mono">{(top2.totalListens || 0).toLocaleString()}</span>
-                  </div>
-                </div>
-
-                {top2.topSong && (
-                  <div className="bg-slate-900/60 border border-white/[0.06] rounded-xl p-2.5 mb-4 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Zap className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-                      <div className="min-w-0">
-                        <div className="text-[10px] text-slate-400">Pi Gwo Moso:</div>
-                        <div className="text-xs font-bold text-white truncate">{top2.topSong.title}</div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => top2.topSong && onPlayToggle(top2.topSong)}
-                      className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white shrink-0"
-                      title="Koute"
-                    >
-                      {currentPlayingId === top2.topSong.id && isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current ml-0.5" />}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2 pt-2">
-                <button
-                  onClick={() => onOpenArtistProfile(top2.artist)}
-                  className="flex-1 py-2.5 px-3 rounded-xl text-xs font-bold bg-[#0d1424] hover:bg-[#131c33] text-slate-200 border border-white/[0.1] transition-all text-center"
-                >
-                  Gade Pwofil
-                </button>
-                {top2.topSong && (
-                  <button
-                    onClick={() => onOpenSupport(top2.topSong!)}
-                    className="flex-1 py-2.5 px-3 rounded-xl text-xs font-black bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-slate-950 shadow-lg shadow-yellow-950/40 flex items-center justify-center gap-1.5 transition-all active:scale-95"
-                  >
-                    <HeartHandshake className="w-3.5 h-3.5" />
-                    <span>Sipòte ($)</span>
-                  </button>
-                )}
-              </div>
+      {/* Podium Top 3 Visual Cards (Responsive 3-Column Layout, Always Visible) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 pt-2">
+        {/* #2 Rank - Silver */}
+        {top2?.artist ? (
+          <div className="order-2 md:order-1 relative bg-gradient-to-b from-slate-900/90 via-[#0a0f1d]/95 to-[#05070a] border border-slate-400/30 rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-2xl backdrop-blur-2xl group hover:border-slate-300/50 transition-all duration-300">
+            <div className="absolute -top-3.5 left-6 px-3 py-1 rounded-full bg-slate-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg border border-white">
+              <Medal className="w-3.5 h-3.5 text-slate-800" />
+              <span>#2 Top Atis</span>
             </div>
-          )}
 
-          {/* #1 Rank - Champion Gold */}
-          {top1?.artist && (
-            <div className="order-1 md:order-2 relative bg-gradient-to-b from-amber-950/60 via-[#0a0f1d] to-[#05070a] border-2 border-yellow-400/60 rounded-3xl p-6 sm:p-7 flex flex-col justify-between shadow-2xl shadow-yellow-500/10 backdrop-blur-2xl group hover:border-yellow-400 transition-all duration-300 transform md:-translate-y-2">
-              <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full bg-gradient-to-r from-yellow-400 via-amber-300 to-yellow-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-xl border-2 border-white uppercase tracking-wider">
-                <Crown className="w-4 h-4 fill-slate-950" />
-                <span>#1 Chanpyon Leaderboard</span>
-              </div>
-
-              <div>
-                <div className="flex flex-col items-center text-center mt-3 mb-4">
-                  <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-3xl overflow-hidden border-4 border-yellow-400 shadow-2xl shadow-yellow-400/20 mb-3 bg-black">
-                    <img src={top1.artist.avatarUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&auto=format&fit=crop&q=80'} alt={top1.artist.stageName} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                    <div className="absolute bottom-0 inset-x-0 bg-yellow-400 text-slate-950 text-[10px] font-black uppercase py-0.5">
-                      Top 1
-                    </div>
-                  </div>
-                  <h3 className="text-xl sm:text-2xl font-black text-white flex items-center justify-center gap-1.5 flex-wrap">
-                    <span>{top1.artist.stageName}</span>
-                    <CheckCircle2 className="w-5 h-5 text-yellow-400" />
-                    <ArtistBadge donations={top1.cumulativeDonations} size="xs" />
+            <div>
+              <div className="flex items-center gap-4 mt-2 mb-4">
+                <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden border-2 border-slate-300 shadow-md shrink-0 bg-black">
+                  <img src={top2.artist.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80'} alt={top2.artist.stageName} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-lg sm:text-xl font-black text-white truncate flex items-center gap-1.5 flex-wrap">
+                    <span>{top2.artist.stageName}</span>
+                    <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
+                    <ArtistBadge donations={top2.cumulativeDonations} size="xs" />
                   </h3>
-                  <p className="text-xs text-slate-300 font-medium mt-0.5">{top1.artist.name}</p>
-                  <div className="flex items-center gap-1.5 text-xs text-yellow-400 mt-1">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-0.5">
+                    <MapPin className="w-3 h-3 text-slate-300" />
+                    <span className="truncate">{top2.artist.city || 'Ayiti'}</span>
+                  </div>
+                  <span className="inline-block text-[10px] font-bold text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded-md mt-1.5 border border-slate-700">
+                    {top2.primaryGenre}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-[#05070a]/90 border border-white/[0.08] rounded-2xl p-3.5 mb-4 grid grid-cols-2 gap-2 text-center">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Nivo Kominotè</span>
+                  <span className="text-xs sm:text-sm font-black text-yellow-400">
+                    {getArtistBadgeInfo(top2.artist, musicList).label}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Ekout</span>
+                  <span className="text-lg font-black text-white font-mono">{(top2.totalListens || 0).toLocaleString()}</span>
+                </div>
+              </div>
+
+              {top2.topSong && (
+                <div className="bg-slate-900/60 border border-white/[0.06] rounded-xl p-2.5 mb-4 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Zap className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-[10px] text-slate-400">Pi Gwo Moso:</div>
+                      <div className="text-xs font-bold text-white truncate">{top2.topSong.title}</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => top2.topSong && onPlayToggle(top2.topSong)}
+                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white shrink-0"
+                    title="Koute"
+                  >
+                    {currentPlayingId === top2.topSong.id && isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current ml-0.5" />}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => onOpenArtistProfile(top2.artist)}
+                className="flex-1 py-2.5 px-3 rounded-xl text-xs font-bold bg-[#0d1424] hover:bg-[#131c33] text-slate-200 border border-white/[0.1] transition-all text-center"
+              >
+                Gade Pwofil
+              </button>
+              {top2.topSong && (
+                <button
+                  onClick={() => onOpenSupport(top2.topSong!)}
+                  className="flex-1 py-2.5 px-3 rounded-xl text-xs font-black bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-slate-950 shadow-lg shadow-yellow-950/40 flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                >
+                  <HeartHandshake className="w-3.5 h-3.5" />
+                  <span>Sipòte ($)</span>
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="order-2 md:order-1 relative bg-gradient-to-b from-slate-900/40 via-[#0a0f1d]/70 to-[#05070a] border border-dashed border-slate-500/30 rounded-3xl p-5 sm:p-6 flex flex-col justify-between backdrop-blur-xl group">
+            <div className="absolute -top-3.5 left-6 px-3 py-1 rounded-full bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 shadow-lg border border-slate-600">
+              <Medal className="w-3.5 h-3.5 text-slate-400" />
+              <span>#2 Top Atis</span>
+            </div>
+            <div>
+              <div className="flex items-center gap-4 mt-3 mb-4">
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border border-dashed border-slate-600 flex items-center justify-center bg-black/40 text-slate-400 shrink-0">
+                  <Medal className="w-8 h-8 opacity-60" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white">Plas #2 Disponib</h3>
+                  <p className="text-xs text-slate-400 mt-1">Rezève pou 2èm atis ki monte nan klasman an</p>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => (onOpenArtistAuth ? onOpenArtistAuth() : (window.location.href = '/pibliye.php'))}
+              className="w-full py-2.5 px-3 rounded-xl text-xs font-bold bg-white/[0.06] hover:bg-slate-300 hover:text-slate-950 text-slate-300 border border-white/[0.08] transition-all text-center"
+            >
+              Enskri kòm Atis
+            </button>
+          </div>
+        )}
+
+        {/* #1 Rank - Champion Gold */}
+        {top1?.artist ? (
+          <div className="order-1 md:order-2 relative bg-gradient-to-b from-amber-950/60 via-[#0a0f1d] to-[#05070a] border-2 border-yellow-400/60 rounded-3xl p-6 sm:p-7 flex flex-col justify-between shadow-2xl shadow-yellow-500/10 backdrop-blur-2xl group hover:border-yellow-400 transition-all duration-300 transform md:-translate-y-2">
+            <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full bg-gradient-to-r from-yellow-400 via-amber-300 to-yellow-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-xl border-2 border-white uppercase tracking-wider">
+              <Crown className="w-4 h-4 fill-slate-950" />
+              <span>#1 Chanpyon Leaderboard</span>
+            </div>
+
+            <div>
+              <div className="flex flex-col items-center text-center mt-3 mb-4">
+                <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-3xl overflow-hidden border-4 border-yellow-400 shadow-2xl shadow-yellow-400/20 mb-3 bg-black">
+                  <img src={top1.artist.avatarUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&auto=format&fit=crop&q=80'} alt={top1.artist.stageName} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                  <div className="absolute bottom-0 inset-x-0 bg-yellow-400 text-slate-950 text-[10px] font-black uppercase py-0.5">
+                    Top 1
+                  </div>
+                </div>
+                <h3 className="text-xl sm:text-2xl font-black text-white flex items-center justify-center gap-1.5 flex-wrap">
+                  <span>{top1.artist.stageName}</span>
+                  <CheckCircle2 className="w-5 h-5 text-yellow-400" />
+                  <ArtistBadge donations={top1.cumulativeDonations} size="xs" />
+                </h3>
+                <p className="text-xs text-slate-300 font-medium mt-0.5">{top1.artist.name}</p>
+                <div className="flex items-center gap-1.5 text-xs text-yellow-400 mt-1">
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>{top1.artist.city || 'Ayiti'}</span>
+                </div>
+              </div>
+
+              <div className="bg-[#05070a]/95 border border-yellow-500/20 rounded-2xl p-4 mb-4 grid grid-cols-2 gap-3 text-center">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-yellow-400/80 block">Nivo Kominotè</span>
+                  <span className="text-sm sm:text-base font-black text-yellow-400">
+                    {getArtistBadgeInfo(top1.artist, musicList).label}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Ekout</span>
+                  <span className="text-2xl font-black text-white font-mono">{(top1.totalListens || 0).toLocaleString()}</span>
+                </div>
+              </div>
+
+              {top1.topSong && (
+                <div className="bg-yellow-950/20 border border-yellow-500/30 rounded-2xl p-3 mb-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Flame className="w-4 h-4 text-amber-400 shrink-0 animate-bounce" />
+                    <div className="min-w-0">
+                      <div className="text-[10px] font-bold text-yellow-400 uppercase tracking-wider">Hit K ap Pote L Pi Wo:</div>
+                      <div className="text-xs font-black text-white truncate">{top1.topSong.title}</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => top1.topSong && onPlayToggle(top1.topSong)}
+                    className="p-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-slate-950 shrink-0 font-bold shadow-md shadow-yellow-500/30"
+                    title="Koute Koulye a"
+                  >
+                    {currentPlayingId === top1.topSong.id && isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                onClick={() => onOpenArtistProfile(top1.artist)}
+                className="flex-1 py-3 px-3.5 rounded-2xl text-xs font-bold bg-[#0d1424] hover:bg-[#131c33] text-slate-200 border border-white/[0.12] transition-all text-center"
+              >
+                Pwofil Atis
+              </button>
+              {top1.topSong && (
+                <button
+                  onClick={() => onOpenSupport(top1.topSong!)}
+                  className="flex-1 py-3 px-3.5 rounded-2xl text-xs font-black bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-500 hover:from-yellow-300 hover:to-amber-400 text-slate-950 shadow-xl shadow-yellow-500/30 flex items-center justify-center gap-2 transition-all active:scale-95"
+                >
+                  <HeartHandshake className="w-4 h-4" />
+                  <span>Sipòte Chanpyon an</span>
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="order-1 md:order-2 relative bg-gradient-to-b from-amber-950/30 via-[#0a0f1d] to-[#05070a] border-2 border-dashed border-yellow-400/40 rounded-3xl p-6 sm:p-7 flex flex-col justify-between backdrop-blur-2xl group transform md:-translate-y-2">
+            <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full bg-yellow-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-xl border-2 border-white uppercase tracking-wider">
+              <Crown className="w-4 h-4 fill-slate-950" />
+              <span>#1 Chanpyon Leaderboard</span>
+            </div>
+            <div>
+              <div className="flex flex-col items-center text-center mt-3 mb-4">
+                <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl border-2 border-dashed border-yellow-400/50 flex items-center justify-center bg-black/50 text-yellow-400 mb-3">
+                  <Crown className="w-12 h-12 animate-pulse" />
+                </div>
+                <h3 className="text-xl font-black text-white">Plas #1 Disponib</h3>
+                <p className="text-xs text-slate-300 mt-1">Rezève pou premye atis ki mennen klasman an!</p>
+              </div>
+            </div>
+            <button
+              onClick={() => (onOpenArtistAuth ? onOpenArtistAuth() : (window.location.href = '/pibliye.php'))}
+              className="w-full py-3 px-3.5 rounded-2xl text-xs font-black bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-500 hover:from-yellow-300 hover:to-amber-400 text-slate-950 shadow-xl shadow-yellow-500/30 transition-all text-center"
+            >
+              Enskri kòm Atis Pou Pran Plas la
+            </button>
+          </div>
+        )}
+
+        {/* #3 Rank - Bronze */}
+        {top3?.artist ? (
+          <div className="order-3 md:order-3 relative bg-gradient-to-b from-amber-950/40 via-[#0a0f1d]/95 to-[#05070a] border border-amber-600/30 rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-2xl backdrop-blur-2xl group hover:border-amber-500/50 transition-all duration-300">
+            <div className="absolute -top-3.5 left-6 px-3 py-1 rounded-full bg-amber-700 text-white font-black text-xs flex items-center gap-1.5 shadow-lg border border-amber-400/50">
+              <Medal className="w-3.5 h-3.5 text-amber-300" />
+              <span>#3 Top Atis</span>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-4 mt-2 mb-4">
+                <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden border-2 border-amber-600 shadow-md shrink-0 bg-black">
+                  <img src={top3.artist.avatarUrl || 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=300&auto=format&fit=crop&q=80'} alt={top3.artist.stageName} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-lg sm:text-xl font-black text-white truncate flex items-center gap-1.5 flex-wrap">
+                    <span>{top3.artist.stageName}</span>
+                    <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
+                    <ArtistBadge donations={top3.cumulativeDonations} size="xs" />
+                  </h3>
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-0.5">
                     <MapPin className="w-3.5 h-3.5" />
-                    <span>{top1.artist.city || 'Ayiti'}</span>
+                    <span>{top3.artist.city || 'Ayiti'}</span>
                   </div>
+                  <span className="inline-block text-[10px] font-bold text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded-md mt-1.5 border border-amber-700">
+                    {top3.primaryGenre}
+                  </span>
                 </div>
-
-                <div className="bg-[#05070a]/95 border border-yellow-500/20 rounded-2xl p-4 mb-4 grid grid-cols-2 gap-3 text-center">
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-yellow-400/80 block">Nivo Kominotè</span>
-                    <span className="text-sm sm:text-base font-black text-yellow-400">
-                      {getArtistBadgeInfo(top1.artist, musicList).label}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Ekout</span>
-                    <span className="text-2xl font-black text-white font-mono">{(top1.totalListens || 0).toLocaleString()}</span>
-                  </div>
-                </div>
-
-                {top1.topSong && (
-                  <div className="bg-yellow-950/20 border border-yellow-500/30 rounded-2xl p-3 mb-4 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <Flame className="w-4 h-4 text-amber-400 shrink-0 animate-bounce" />
-                      <div className="min-w-0">
-                        <div className="text-[10px] font-bold text-yellow-400 uppercase tracking-wider">Hit K ap Pote L Pi Wo:</div>
-                        <div className="text-xs font-black text-white truncate">{top1.topSong.title}</div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => top1.topSong && onPlayToggle(top1.topSong)}
-                      className="p-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-slate-950 shrink-0 font-bold shadow-md shadow-yellow-500/30"
-                      title="Koute Koulye a"
-                    >
-                      {currentPlayingId === top1.topSong.id && isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
-                    </button>
-                  </div>
-                )}
               </div>
 
-              <div className="flex items-center gap-2.5 pt-2">
-                <button
-                  onClick={() => onOpenArtistProfile(top1.artist)}
-                  className="flex-1 py-3 px-3.5 rounded-2xl text-xs font-bold bg-[#0d1424] hover:bg-[#131c33] text-slate-200 border border-white/[0.12] transition-all text-center"
-                >
-                  Pwofil Atis
-                </button>
-                {top1.topSong && (
+              <div className="bg-[#05070a]/90 border border-white/[0.08] rounded-2xl p-3.5 mb-4 grid grid-cols-2 gap-2 text-center">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Nivo Kominotè</span>
+                  <span className="text-xs sm:text-sm font-black text-yellow-400">
+                    {getArtistBadgeInfo(top3.artist, musicList).label}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Ekout</span>
+                  <span className="text-lg font-black text-white font-mono">{(top3.totalListens || 0).toLocaleString()}</span>
+                </div>
+              </div>
+
+              {top3.topSong && (
+                <div className="bg-slate-900/60 border border-white/[0.06] rounded-xl p-2.5 mb-4 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-[10px] text-slate-400">Pi Gwo Moso:</div>
+                      <div className="text-xs font-bold text-white truncate">{top3.topSong.title}</div>
+                    </div>
+                  </div>
                   <button
-                    onClick={() => onOpenSupport(top1.topSong!)}
-                    className="flex-1 py-3 px-3.5 rounded-2xl text-xs font-black bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-500 hover:from-yellow-300 hover:to-amber-400 text-slate-950 shadow-xl shadow-yellow-500/30 flex items-center justify-center gap-2 transition-all active:scale-95"
+                    onClick={() => top3.topSong && onPlayToggle(top3.topSong)}
+                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white shrink-0"
+                    title="Koute"
                   >
-                    <HeartHandshake className="w-4 h-4" />
-                    <span>Sipòte Chanpyon an</span>
+                    {currentPlayingId === top3.topSong.id && isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current ml-0.5" />}
                   </button>
-                )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => onOpenArtistProfile(top3.artist)}
+                className="flex-1 py-2.5 px-3 rounded-xl text-xs font-bold bg-[#0d1424] hover:bg-[#131c33] text-slate-200 border border-white/[0.1] transition-all text-center"
+              >
+                Gade Pwofil
+              </button>
+              {top3.topSong && (
+                <button
+                  onClick={() => onOpenSupport(top3.topSong!)}
+                  className="flex-1 py-2.5 px-3 rounded-xl text-xs font-black bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-slate-950 shadow-lg shadow-yellow-950/40 flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                >
+                  <HeartHandshake className="w-3.5 h-3.5" />
+                  <span>Sipòte ($)</span>
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="order-3 md:order-3 relative bg-gradient-to-b from-amber-950/20 via-[#0a0f1d]/70 to-[#05070a] border border-dashed border-amber-600/30 rounded-3xl p-5 sm:p-6 flex flex-col justify-between backdrop-blur-xl group">
+            <div className="absolute -top-3.5 left-6 px-3 py-1 rounded-full bg-amber-900 text-amber-200 font-bold text-xs flex items-center gap-1.5 shadow-lg border border-amber-700">
+              <Medal className="w-3.5 h-3.5 text-amber-400" />
+              <span>#3 Top Atis</span>
+            </div>
+            <div>
+              <div className="flex items-center gap-4 mt-3 mb-4">
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border border-dashed border-amber-700 flex items-center justify-center bg-black/40 text-amber-400 shrink-0">
+                  <Medal className="w-8 h-8 opacity-60" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white">Plas #3 Disponib</h3>
+                  <p className="text-xs text-slate-400 mt-1">Rezève pou 3èm atis ki monte nan klasman an</p>
+                </div>
               </div>
             </div>
-          )}
-
-          {/* #3 Rank - Bronze */}
-          {top3?.artist && (
-            <div className="order-3 md:order-3 relative bg-gradient-to-b from-amber-950/40 via-[#0a0f1d]/95 to-[#05070a] border border-amber-600/30 rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-2xl backdrop-blur-2xl group hover:border-amber-500/50 transition-all duration-300">
-              <div className="absolute -top-3.5 left-6 px-3 py-1 rounded-full bg-amber-700 text-white font-black text-xs flex items-center gap-1.5 shadow-lg border border-amber-400/50">
-                <Medal className="w-3.5 h-3.5 text-amber-300" />
-                <span>#3 Top Atis</span>
-              </div>
-
-              <div>
-                <div className="flex items-center gap-4 mt-2 mb-4">
-                  <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden border-2 border-amber-600 shadow-md shrink-0 bg-black">
-                    <img src={top3.artist.avatarUrl || 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=300&auto=format&fit=crop&q=80'} alt={top3.artist.stageName} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="text-lg sm:text-xl font-black text-white truncate flex items-center gap-1.5 flex-wrap">
-                      <span>{top3.artist.stageName}</span>
-                      <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
-                      <ArtistBadge donations={top3.cumulativeDonations} size="xs" />
-                    </h3>
-                    <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-0.5">
-                      <MapPin className="w-3 h-3 text-amber-400" />
-                      <span className="truncate">{top3.artist.city || 'Ayiti'}</span>
-                    </div>
-                    <span className="inline-block text-[10px] font-bold text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded-md mt-1.5 border border-amber-700">
-                      {top3.primaryGenre}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="bg-[#05070a]/90 border border-white/[0.08] rounded-2xl p-3.5 mb-4 grid grid-cols-2 gap-2 text-center">
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Nivo Kominotè</span>
-                    <span className="text-xs sm:text-sm font-black text-yellow-400">
-                      {getArtistBadgeInfo(top3.artist, musicList).label}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Ekout</span>
-                    <span className="text-lg font-black text-white font-mono">{(top3.totalListens || 0).toLocaleString()}</span>
-                  </div>
-                </div>
-
-                {top3.topSong && (
-                  <div className="bg-slate-900/60 border border-white/[0.06] rounded-xl p-2.5 mb-4 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <div className="min-w-0">
-                        <div className="text-[10px] text-slate-400">Pi Gwo Moso:</div>
-                        <div className="text-xs font-bold text-white truncate">{top3.topSong.title}</div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => top3.topSong && onPlayToggle(top3.topSong)}
-                      className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white shrink-0"
-                      title="Koute"
-                    >
-                      {currentPlayingId === top3.topSong.id && isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current ml-0.5" />}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2 pt-2">
-                <button
-                  onClick={() => onOpenArtistProfile(top3.artist)}
-                  className="flex-1 py-2.5 px-3 rounded-xl text-xs font-bold bg-[#0d1424] hover:bg-[#131c33] text-slate-200 border border-white/[0.1] transition-all text-center"
-                >
-                  Gade Pwofil
-                </button>
-                {top3.topSong && (
-                  <button
-                    onClick={() => onOpenSupport(top3.topSong!)}
-                    className="flex-1 py-2.5 px-3 rounded-xl text-xs font-black bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-slate-950 shadow-lg shadow-yellow-950/40 flex items-center justify-center gap-1.5 transition-all active:scale-95"
-                  >
-                    <HeartHandshake className="w-3.5 h-3.5" />
-                    <span>Sipòte ($)</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+            <button
+              onClick={() => (onOpenArtistAuth ? onOpenArtistAuth() : (window.location.href = '/pibliye.php'))}
+              className="w-full py-2.5 px-3 rounded-xl text-xs font-bold bg-white/[0.06] hover:bg-amber-500 hover:text-slate-950 text-slate-300 border border-white/[0.08] transition-all text-center"
+            >
+              Enskri kòm Atis
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Full Top 10 Interactive Table & List */}
       <div className="bg-[#0a0f1d]/90 border border-white/[0.08] rounded-3xl p-5 sm:p-8 shadow-2xl backdrop-blur-2xl space-y-6">

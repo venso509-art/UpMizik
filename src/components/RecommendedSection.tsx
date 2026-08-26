@@ -63,7 +63,31 @@ export const RecommendedSection: React.FC<RecommendedSectionProps> = ({
     return StorageService.getRecommendations(musicList, 6);
   }, [musicList, currentPlayingId]);
 
-  if (!recommendations || recommendations.length === 0) return null;
+  if (!recommendations || recommendations.length === 0) {
+    return (
+      <section
+        id="recommended-section"
+        className="relative rounded-3xl p-6 sm:p-8 bg-gradient-to-b from-[#0b1329]/90 via-[#0a0f1d]/90 to-[#05070a] border border-cyan-500/20 shadow-2xl shadow-cyan-950/20 backdrop-blur-2xl overflow-hidden"
+      >
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
+              <Radio className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <h2 className="text-xl font-black text-white flex items-center gap-2">
+                <span>Atis Pou Ou • Algoritm Entelijan</span>
+                <Sparkles className="w-4 h-4 text-yellow-400" />
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-400 mt-1">
+                Espas sa a pare pou klase mizik ak atis yo otomatikman selon sa w koute ak preferans ou!
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section

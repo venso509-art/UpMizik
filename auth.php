@@ -26,7 +26,7 @@ define('AUTH_ALERT_THRESHOLD', 3);              // Kantite tantativ echwe pou de
 define('AUTH_MAX_FAILED_ATTEMPTS', 3);          // Kantite tantativ echwe maksimòm anvan blokaj (3 tantativ)
 define('AUTH_RATE_LIMIT_WINDOW', 900);          // Fenèt tan kout pou kalkil tantativ yo (15 minit = 900 segond)
 define('AUTH_LOCKOUT_DURATION', 900);           // Dire blokaj tanporè kont lan (15 minit = 900 segond)
-define('ADMIN_DEFAULT_EMAIL', 'upmizik.haiti@gmail.com'); // Imèl notifikasyon sekirite admin pa defo
+define('ADMIN_DEFAULT_EMAIL', 'upmizik@gmail.com'); // Imèl notifikasyon sekirite admin pa defo
 
 /**
  * Rekipere epi netwaye adrès IP reyèl kliyan an (ak sipò Cloudflare & Reverse Proxy)

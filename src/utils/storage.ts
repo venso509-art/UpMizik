@@ -34,29 +34,30 @@ import {
 } from '../data/initialData';
 import { IdbStorage } from './idbStorage';
 import { buildAwardCelebrationMessage, AwardTierDefinition } from './awardsUtils';
+import { UserIdentifier } from './userIdentifier';
 
 const KEYS = {
-  MUSIC: 'upmizik_music_v1',
-  ARTISTS: 'upmizik_artists_v1',
-  DONATIONS: 'upmizik_donations_v1',
-  PUBS: 'upmizik_pubs_v1',
-  RPA: 'upmizik_rpa_v1',
-  ARCHIVES: 'upmizik_archives_v1',
-  COMMENTS: 'upmizik_comments_v1',
-  SOCIAL_POSTS: 'upmizik_social_posts_v1',
-  SOCIAL_COMMENTS: 'upmizik_social_comments_v1',
-  ARTIST_INBOX: 'upmizik_artist_inbox_v1',
-  PUSH_NOTIFICATIONS: 'upmizik_push_notifications_v1',
-  CURRENT_ARTIST: 'upmizik_current_artist_v1',
+  MUSIC: 'upmizik_music_v2',
+  ARTISTS: 'upmizik_artists_v2',
+  DONATIONS: 'upmizik_donations_v2',
+  PUBS: 'upmizik_pubs_v2',
+  RPA: 'upmizik_rpa_v2',
+  ARCHIVES: 'upmizik_archives_v2',
+  COMMENTS: 'upmizik_comments_v2',
+  SOCIAL_POSTS: 'upmizik_social_posts_v2',
+  SOCIAL_COMMENTS: 'upmizik_social_comments_v2',
+  ARTIST_INBOX: 'upmizik_artist_inbox_v2',
+  PUSH_NOTIFICATIONS: 'upmizik_push_notifications_v2',
+  CURRENT_ARTIST: 'upmizik_current_artist_v2',
   CURRENT_ADMIN: 'upmizik_current_admin_v1',
   ADMIN_PIN: 'upmizik_admin_pin_v1',
   ADMIN_EMAIL: 'upmizik_admin_email_v1',
-  LISTEN_HISTORY: 'upmizik_listen_history_v1',
-  RECENT_LISTENED_IDS: 'upmizik_recent_listened_ids_v1',
-  TOP3_OVERRIDE: 'upmizik_top3_override_v1',
+  LISTEN_HISTORY: 'upmizik_listen_history_v2',
+  RECENT_LISTENED_IDS: 'upmizik_recent_listened_ids_v2',
+  TOP3_OVERRIDE: 'upmizik_top3_override_v2',
   THEME: 'upmizik_theme_mode_v1',
-  LIKED_MUSIC: 'upmizik_liked_music_ids_v1',
-  AWARD_DELIVERIES: 'upmizik_award_deliveries_v1',
+  LIKED_MUSIC: 'upmizik_liked_music_ids_v2',
+  AWARD_DELIVERIES: 'upmizik_award_deliveries_v2',
   PAYMENT_SETTINGS: 'upmizik_payment_settings_v1',
   ADMIN_MASTER_KEY: 'upmizik_admin_master_key_v1',
   INTRUSION_LOGS: 'upmizik_intrusion_logs_v1',
@@ -334,36 +335,20 @@ export const StorageService = {
   // MUSIC
   getMusic: (): MusicItem[] => {
     const list = getStoredData<MusicItem[]>(KEYS.MUSIC, INITIAL_MUSIC);
-    const initialMap = new Map(INITIAL_MUSIC.map(im => [im.id, im]));
-    const existingIds = new Set(list.map(m => m.id));
-
-    // Ensure all curated category tracks from INITIAL_MUSIC are available
-    const mergedList = [...list];
-    for (const im of INITIAL_MUSIC) {
-      if (!existingIds.has(im.id)) {
-        mergedList.push(im);
-        existingIds.add(im.id);
-      }
-    }
-
-    const enhanced = mergedList.map((m, idx) => {
-      const initialMatch = initialMap.get(m.id);
+    const enhanced = list.map((m, idx) => {
       let updated = { ...m };
       if (typeof updated.sharesCount === 'undefined') {
-        updated.sharesCount = initialMatch?.sharesCount ?? Math.floor((m.listens || 100) / 750) + 1;
+        updated.sharesCount = Math.floor((m.listens || 100) / 750) + 1;
       }
       if (!updated.status) {
-        updated.status = initialMatch?.status || 'active';
-      }
-      if (!updated.collab && initialMatch?.collab) {
-        updated.collab = initialMatch.collab;
+        updated.status = 'active';
       }
       if (typeof updated.position !== 'number' || updated.position <= 0) {
-        updated.position = initialMatch?.position || (idx + 1);
+        updated.position = idx + 1;
       }
       // Repair legacy invalid/idb coverUrl entries
       if (!updated.coverUrl || updated.coverUrl.startsWith('idb:') || updated.coverUrl.trim() === '') {
-        updated.coverUrl = initialMatch?.coverUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80';
+        updated.coverUrl = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80';
       }
       return updated;
     });
@@ -517,17 +502,25 @@ export const StorageService = {
     }
   },
 
-  incrementListenCount: (musicId: string): boolean => {
+  /**
+   * Enkremante kantite ekout pou yon mizik yon fason inik.
+   * Si menm itilizatè a te koute mizik sa a deja, li PA ogmante kantite ekout la ankò (menm si li replay li).
+   * Chak itilizatè/aparèy konte yon sèl fwa pou chak mizik.
+   */
+  incrementListenCount: (musicId: string, customUserId?: string): boolean => {
     try {
-      const history = getStoredData<Record<string, number>>(KEYS.LISTEN_HISTORY, {});
-      const now = Date.now();
-      const lastListened = history[musicId] || 0;
-      
-      // Prevent spam counting: must be at least 15 seconds apart for the same session/track
-      if (now - lastListened < 15000) {
+      if (!musicId) return false;
+
+      // Verify if THIS unique user has already listened to this track
+      const recordResult = UserIdentifier.recordSongListenForUser(musicId, customUserId);
+      if (!recordResult.isNewListen) {
+        // User already listened to this song previously -> Do NOT increment stream count again!
         return false;
       }
-      
+
+      // Also record in listen history timestamp
+      const history = getStoredData<Record<string, number>>(KEYS.LISTEN_HISTORY, {});
+      const now = Date.now();
       history[musicId] = now;
       setStoredData(KEYS.LISTEN_HISTORY, history);
 
@@ -560,6 +553,41 @@ export const StorageService = {
       console.error('Error incrementing listen count:', e);
       return false;
     }
+  },
+
+  /**
+   * Tcheke si itilizatè k ap gade a te deja koute mizik sa a
+   */
+  hasUserListenedToSong: (musicId: string, customUserId?: string): boolean => {
+    return UserIdentifier.hasUserListenedToSong(musicId, customUserId);
+  },
+
+  /**
+   * Jwenn pwofil ak idantifyan inik itilizatè a
+   */
+  getUserListeningProfile: () => {
+    return UserIdentifier.getUserProfile();
+  },
+
+  /**
+   * Jwenn tout ID mizik itilizatè sa a te deja koute
+   */
+  getUserListenedSongIds: (): string[] => {
+    return UserIdentifier.getListenedSongIds();
+  },
+
+  /**
+   * Jwenn kantite oditè inik pou yon mizik espesifik
+   */
+  getSongUniqueListenersCount: (musicId: string, fallbackListens: number = 0): number => {
+    return UserIdentifier.getSongUniqueListenersCount(musicId, fallbackListens);
+  },
+
+  /**
+   * Jwenn tout kantite oditè inik pou tout katalòg yon atis
+   */
+  getArtistUniqueListenersCount: (artistSongs: { id: string; listens?: number }[]): number => {
+    return UserIdentifier.getArtistUniqueListenersCount(artistSongs);
   },
 
   // RECENT LISTENS & RECOMMENDATION HEURISTIC
@@ -768,14 +796,10 @@ export const StorageService = {
   // ARTISTS
   getArtists: (): ArtistUser[] => {
     const list = getStoredData<ArtistUser[]>(KEYS.ARTISTS, INITIAL_ARTISTS);
-    // Ensure all INITIAL_ARTISTS are present and enrich missing fields
-    const initialMap = new Map(INITIAL_ARTISTS.map(ia => [ia.id, ia]));
-    let hasUpdates = false;
     const nowTimestamp = Date.now();
 
     const enrichedList = list.map(a => {
       let updated = { ...a };
-      let changed = false;
 
       // Auto-lift suspension if expiration date has passed
       if (updated.status === 'suspended' && updated.suspendedUntil) {
@@ -786,48 +810,11 @@ export const StorageService = {
           updated.suspendedUntil = undefined;
           updated.suspensionDays = undefined;
           updated.suspensionReason = undefined;
-          changed = true;
         }
       }
-
-      const initMatch = initialMap.get(a.id);
-      if (initMatch) {
-        if (!updated.musicalRoots && initMatch.musicalRoots) {
-          updated.musicalRoots = initMatch.musicalRoots;
-          changed = true;
-        }
-        if (!updated.musicalInfluences && initMatch.musicalInfluences) {
-          updated.musicalInfluences = initMatch.musicalInfluences;
-          changed = true;
-        }
-        if (!updated.artisticVision && initMatch.artisticVision) {
-          updated.artisticVision = initMatch.artisticVision;
-          changed = true;
-        }
-        if (!updated.artistQuote && initMatch.artistQuote) {
-          updated.artistQuote = initMatch.artistQuote;
-          changed = true;
-        }
-        if ((!updated.bio || updated.bio.length < 90) && initMatch.bio) {
-          updated.bio = initMatch.bio;
-          changed = true;
-        }
-      }
-
-      if (changed) {
-        hasUpdates = true;
-        return updated;
-      }
-      return a;
+      return updated;
     });
 
-    const existingIds = new Set(enrichedList.map(a => a.id));
-    const missing = INITIAL_ARTISTS.filter(ia => !existingIds.has(ia.id));
-    if (missing.length > 0 || hasUpdates) {
-      const merged = [...enrichedList, ...missing];
-      setStoredData(KEYS.ARTISTS, merged);
-      return merged;
-    }
     return enrichedList;
   },
   saveArtists: (list: ArtistUser[]) => {
@@ -1514,6 +1501,37 @@ export const StorageService = {
     const updated = [post, ...current];
     StorageService.saveSocialPosts(updated);
     return post;
+  },
+
+  deleteSocialPost: (postId: string, actorName: string = 'Admin'): boolean => {
+    const posts = StorageService.getSocialPosts();
+    const targetPost = posts.find((p) => p.id === postId);
+    const updated = posts.filter((p) => p.id !== postId);
+    StorageService.saveSocialPosts(updated);
+
+    // Clean up comments for this post
+    const allComments = getStoredData<Record<string, SocialPostComment[]>>(
+      KEYS.SOCIAL_COMMENTS,
+      INITIAL_SOCIAL_POST_COMMENTS
+    );
+    if (allComments[postId]) {
+      delete allComments[postId];
+      setStoredData(KEYS.SOCIAL_COMMENTS, allComments);
+    }
+
+    // Also log activity
+    if (targetPost) {
+      StorageService.addActivityLog({
+        eventType: 'action_securite',
+        email: targetPost.handle || 'admin@upmizik.com',
+        artistId: targetPost.artistId || 'system',
+        artistName: targetPost.stageName || targetPost.artistName || 'Atis',
+        reason: `${actorName} siprime yon pòs kominotè atis la (${targetPost.stageName || targetPost.artistName}) avan/pandan limit 30 jou a.`,
+        status: 'success'
+      });
+    }
+
+    return true;
   },
 
   likeSocialPost: (postId: string): { likes: number; isLiked: boolean } => {
@@ -3017,6 +3035,9 @@ upmizik.com • admin.upmizik@gmail.com`,
   // PLATFORM VISITS & TRAFFIC TRACKING (ILIMITE)
   trackSiteVisit: (): number => {
     try {
+      // Initialize or refresh unique user identifier session
+      UserIdentifier.initUserSession();
+
       const current = StorageService.getSiteVisits();
       const next = current + 1;
       setStoredData(KEYS.SITE_VISITS, next);
@@ -3052,5 +3073,50 @@ upmizik.com • admin.upmizik@gmail.com`,
       totalListens,
       isUnlimitedCapacity: true
     };
+  },
+
+  // COMPLETE CONTENT RESET (Removes all artists, music, and social posts)
+  resetContentData: () => {
+    try {
+      // Clear localStorage content keys
+      setStoredData(KEYS.MUSIC, []);
+      setStoredData(KEYS.ARTISTS, []);
+      setStoredData(KEYS.SOCIAL_POSTS, []);
+      setStoredData(KEYS.SOCIAL_COMMENTS, {});
+      setStoredData(KEYS.COMMENTS, []);
+      setStoredData(KEYS.ARTIST_INBOX, []);
+      setStoredData(KEYS.CURRENT_ARTIST, null);
+      setStoredData(KEYS.LISTEN_HISTORY, []);
+      setStoredData(KEYS.RECENT_LISTENED_IDS, []);
+      setStoredData(KEYS.LIKED_MUSIC, []);
+      setStoredData(KEYS.TOP3_OVERRIDE, null);
+
+      // Clean up legacy keys if present
+      const legacyKeys = [
+        'upmizik_music_v1',
+        'upmizik_artists_v1',
+        'upmizik_social_posts_v1',
+        'upmizik_social_comments_v1',
+        'upmizik_comments_v1',
+        'upmizik_artist_inbox_v1',
+        'upmizik_current_artist_v1',
+        'upmizik_listen_history_v1',
+        'upmizik_recent_listened_ids_v1',
+        'upmizik_liked_music_ids_v1',
+        'upmizik_top3_override_v1'
+      ];
+      legacyKeys.forEach(k => {
+        try { localStorage.removeItem(k); } catch {}
+      });
+
+      // Dispatch real-time events
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('upmizik_music_updated', { detail: { action: 'reset' } }));
+        window.dispatchEvent(new CustomEvent('upmizik_artist_updated', { detail: { action: 'reset' } }));
+        window.dispatchEvent(new CustomEvent('upmizik_social_updated', { detail: { action: 'reset' } }));
+      }
+    } catch (e) {
+      console.warn('Error resetting content data:', e);
+    }
   }
 };

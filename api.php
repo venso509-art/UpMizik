@@ -32,6 +32,153 @@ function sendResponse($success, $data = null, $message = '', $statusCode = 200) 
     exit;
 }
 
+/**
+ * Fonksyon pou detekte kolòn odyo a nan tab 'musiques' ('audioUrl' oswa 'audio_url')
+ * sa pèmèt li konpatib 100% ak nenpòt estrikti baz done MySQL.
+ */
+function getMusiquesAudioColumn($db) {
+    static $audioCol = null;
+    if ($audioCol !== null) return $audioCol;
+
+    try {
+        $cols = $db->query("SHOW COLUMNS FROM musiques")->fetchAll(PDO::FETCH_COLUMN);
+        if (is_array($cols)) {
+            if (in_array('audioUrl', $cols)) {
+                $audioCol = 'audioUrl';
+                return $audioCol;
+            }
+            if (in_array('audio_url', $cols)) {
+                $audioCol = 'audio_url';
+                return $audioCol;
+            }
+        }
+    } catch (Exception $e) {}
+
+    $audioCol = 'audio_url';
+    return $audioCol;
+}
+
+/**
+ * Fonksyon pou valide ak estoke fichye odyo avèk finfo_file ak move_uploaded_file
+ * - Validasyon MIME strik avèk finfo_file: sèlman 'audio/mpeg' (MP3) oswa 'audio/wav' (WAV)
+ * - Sèvi ak move_uploaded_file pou estoke odyo yo nan dosye /var/www/html/upmizik/uploads/
+ * - Retounen chemen an pare pou sove nan kolòn 'audioUrl' nan baz done MySQL la
+ */
+function handleAudioUpload($file) {
+    if (!isset($file) || !is_array($file)) {
+        return ['success' => false, 'message' => 'Okenn fichye odyo pa voye nan requèt la.'];
+    }
+
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        $uploadErrors = [
+            UPLOAD_ERR_INI_SIZE   => 'Fichye a twò gwo (depase limit upload_max_filesize nan php.ini).',
+            UPLOAD_ERR_FORM_SIZE  => 'Fichye a depase limit MAX_FILE_SIZE fòmilè a.',
+            UPLOAD_ERR_PARTIAL    => 'Fichye a te telechaje an pati sèlman.',
+            UPLOAD_ERR_NO_FILE    => 'Okenn fichye pa t seleksyone.',
+            UPLOAD_ERR_NO_TMP_DIR => 'Dosye tanporè sèvè a manke.',
+            UPLOAD_ERR_CANT_WRITE => 'Echèk pou ekri fichye a sou disk sèvè a.',
+            UPLOAD_ERR_EXTENSION  => 'Yon ekstansyon PHP te kanpe telechajman an.'
+        ];
+        $msg = $uploadErrors[$file['error']] ?? ('Erè pandan telechajman fichye odyo a (kòd: ' . $file['error'] . ').');
+        return ['success' => false, 'message' => $msg];
+    }
+
+    $tmpName = $file['tmp_name'];
+    $originalName = $file['name'];
+    $fileSize = $file['size'] ?? 0;
+    $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+
+    // 1. Validasyon ekstansyon fichye (sèlman mp3 oswa wav)
+    $allowedExtensions = ['mp3', 'wav'];
+    if (!in_array($ext, $allowedExtensions)) {
+        return [
+            'success' => false,
+            'message' => 'Fòma fichye sa a pa otorize (.' . htmlspecialchars($ext) . '). Se sèlman fichye MP3 (.mp3) oswa WAV (.wav) ki otorize pou lekti mizik.'
+        ];
+    }
+
+    // 2. Validasyon strik MIME Type avèk finfo_file
+    $mimeType = '';
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mimeType = finfo_file($finfo, $tmpName);
+        finfo_close($finfo);
+    } elseif (function_exists('mime_content_type')) {
+        $mimeType = mime_content_type($tmpName);
+    }
+
+    // MIME types otorize: sèlman 'audio/mpeg' (MP3) oswa 'audio/wav' (ak varyant estanda WAV)
+    $allowedMimes = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/mp3'];
+    if (!empty($mimeType) && !in_array($mimeType, $allowedMimes)) {
+        return [
+            'success' => false,
+            'message' => "Tip fichye odyo a pa valid (MIME detekte: " . htmlspecialchars($mimeType) . "). Se sèlman 'audio/mpeg' (MP3) oswa 'audio/wav' ki aksepte sou platfòm lan."
+        ];
+    }
+
+    // 3. Konfigirasyon dosye sib: /var/www/html/upmizik/uploads/
+    $primaryTargetDir = '/var/www/html/upmizik/uploads';
+    $fallbackTargetDir = defined('UPLOAD_DIR') ? UPLOAD_DIR . '/musiques' : (__DIR__ . '/uploads/musiques');
+
+    $targetDir = $primaryTargetDir;
+    if (!file_exists($targetDir)) {
+        if (!@mkdir($targetDir, 0755, true)) {
+            // Fallback sou dosye lokal si /var/www/html/upmizik/uploads pa aksesib
+            $targetDir = $fallbackTargetDir;
+            if (!file_exists($targetDir)) {
+                @mkdir($targetDir, 0755, true);
+            }
+        }
+    }
+
+    if (!is_writable($targetDir)) {
+        @chmod($targetDir, 0755);
+        if (!is_writable($targetDir)) {
+            $targetDir = $fallbackTargetDir;
+            if (!file_exists($targetDir)) {
+                @mkdir($targetDir, 0755, true);
+            }
+            @chmod($targetDir, 0755);
+        }
+    }
+
+    // 4. Jenere yon non inik e sekirize pou fichye a
+    $safeBase = preg_replace('/[^a-zA-Z0-9_-]/', '_', pathinfo($originalName, PATHINFO_FILENAME));
+    $safeBase = substr($safeBase, 0, 40);
+    $uniqueName = 'audio_' . time() . '_' . bin2hex(random_bytes(4)) . '_' . $safeBase . '.' . $ext;
+    $destination = rtrim($targetDir, '/') . '/' . $uniqueName;
+
+    // 5. Deplase fichye odyo a avèk move_uploaded_file
+    if (move_uploaded_file($tmpName, $destination)) {
+        // Pèmisyon lekti pou sèvè web
+        @chmod($destination, 0644);
+
+        // Chemen pou sove nan kolòn audioUrl nan MySQL
+        if (strpos($destination, '/var/www/html/upmizik/uploads') !== false) {
+            $audioUrl = '/uploads/' . $uniqueName;
+        } else {
+            $audioUrl = (defined('UPLOAD_URL') ? UPLOAD_URL : '/uploads') . '/musiques/' . $uniqueName;
+        }
+
+        return [
+            'success'      => true,
+            'audioUrl'     => $audioUrl,
+            'url'          => $audioUrl,
+            'relativePath' => $audioUrl,
+            'fileName'     => $uniqueName,
+            'originalName' => $originalName,
+            'size'         => $fileSize,
+            'mimeType'     => $mimeType ?: ('audio/' . $ext),
+            'path'         => $destination
+        ];
+    }
+
+    return [
+        'success' => false,
+        'message' => 'Echèk pandan deplasman fichye odyo a (move_uploaded_file) nan dosye /var/www/html/upmizik/uploads/.'
+    ];
+}
+
 // Rekipere done POST/PUT an fòma JSON oswa Form Data
 $inputData = [];
 $rawInput = file_get_contents('php://input');
@@ -550,8 +697,8 @@ try {
             $categorie  = trim($params['categorie'] ?? 'Rap Kreyol');
             $format     = trim($params['format'] ?? 'single');
             $nomAlbum   = trim($params['nom_album'] ?? '');
-            $audioUrl   = trim($params['audio_url'] ?? '');
-            $coverUrl   = trim($params['cover_url'] ?? '');
+            $audioUrl   = trim($params['audio_url'] ?? $params['audioUrl'] ?? '');
+            $coverUrl   = trim($params['cover_url'] ?? $params['coverUrl'] ?? '');
             $duree      = intval($params['duree'] ?? 180);
             $youtube    = trim($params['youtube_url'] ?? '');
             $tiktok     = trim($params['tiktok_url'] ?? '');
@@ -561,16 +708,22 @@ try {
                 sendResponse(false, null, 'Tit mizik la obligatwa.', 400);
             }
 
-            // Jere telechajman fichye odyo si li pase pa FormData
-            if (isset($_FILES['audio_file']) && $_FILES['audio_file']['error'] === UPLOAD_ERR_OK) {
-                $audioUp = uploadServerFile($_FILES['audio_file'], 'musiques');
-                if (!$audioUp['success']) {
-                    sendResponse(false, null, $audioUp['message'], 400);
+            // 1. Jere telechajman fichye odyo si li pase pa FormData (ak validasyon finfo_file & move_uploaded_file)
+            $audioFileParam = $_FILES['audio_file'] ?? $_FILES['audioFile'] ?? $_FILES['audio'] ?? null;
+            if ($audioFileParam && isset($audioFileParam['tmp_name']) && !empty($audioFileParam['tmp_name'])) {
+                if ($audioFileParam['error'] === UPLOAD_ERR_OK) {
+                    $audioUp = handleAudioUpload($audioFileParam);
+                    if (!$audioUp['success']) {
+                        sendResponse(false, null, 'Erè fichye odyo: ' . $audioUp['message'], 400);
+                    }
+                    $audioUrl = $audioUp['audioUrl'];
+                } elseif ($audioFileParam['error'] !== UPLOAD_ERR_NO_FILE) {
+                    $audioUp = handleAudioUpload($audioFileParam);
+                    sendResponse(false, null, 'Erè telechajman odyo: ' . $audioUp['message'], 400);
                 }
-                $audioUrl = $audioUp['url'];
             }
 
-            // Jere telechajman foto kouvèti si genyen
+            // 2. Jere telechajman foto kouvèti si genyen
             if (isset($_FILES['cover_file']) && $_FILES['cover_file']['error'] === UPLOAD_ERR_OK) {
                 $coverUp = uploadServerFile($_FILES['cover_file'], 'covers');
                 if ($coverUp['success']) {
@@ -579,7 +732,12 @@ try {
             }
 
             if (empty($audioUrl)) {
-                sendResponse(false, null, 'Fichye odyo oswa lyen audio_url obligatwa pou pibliye yon mizik.', 400);
+                sendResponse(false, null, 'Fichye odyo (MP3 oswa WAV) oswa lyen audioUrl obligatwa pou pibliye mizik la.', 400);
+            }
+
+            // Verifye si audioUrl la valide (URL entènèt oswa chemen lokal /uploads/)
+            if (!filter_var($audioUrl, FILTER_VALIDATE_URL) && strpos($audioUrl, '/uploads/') !== 0 && strpos($audioUrl, 'idb:') !== 0 && strpos($audioUrl, '/var/www/html/upmizik/uploads') !== 0) {
+                sendResponse(false, null, 'Chemen oswa lyen fichye odyo a pa valid pou lekti.', 400);
             }
 
             if (empty($coverUrl)) {
@@ -615,10 +773,13 @@ try {
             $id = $params['id'] ?? ('mus_' . time() . '_' . bin2hex(random_bytes(3)));
             $statut = $params['statut'] ?? 'actif';
 
+            // Detekte non kolòn audio nan tab musiques la ('audioUrl' oswa 'audio_url')
+            $audioCol = getMusiquesAudioColumn($db);
+
             $stmt = $db->prepare("
                 INSERT INTO musiques (
                     id, titre, artiste_id, nom_artiste, featuring, categorie, 
-                    format, nom_album, cover_url, audio_url, duree, 
+                    format, nom_album, cover_url, `{$audioCol}`, duree, 
                     youtube_url, tiktok_url, instagram_url, statut, date_creation
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, 
@@ -637,8 +798,13 @@ try {
             $getM = $db->prepare("SELECT * FROM musiques WHERE id = ?");
             $getM->execute([$id]);
             $newMusique = $getM->fetch();
+            if ($newMusique) {
+                // Asire tou de kle yo disponib nan repons JSON
+                $newMusique['audioUrl'] = $newMusique[$audioCol] ?? $audioUrl;
+                $newMusique['audio_url'] = $newMusique[$audioCol] ?? $audioUrl;
+            }
 
-            sendResponse(true, $newMusique, 'Mizik la pibliye avèk siksè sou UpMizik!', 201);
+            sendResponse(true, $newMusique, 'Mizik la anrejistre epi fichye odyo a estoke avèk siksè nan /var/www/html/upmizik/uploads/ epi sove nan kolòn ' . $audioCol . ' nan MySQL!', 201);
             break;
         }
 
@@ -659,16 +825,22 @@ try {
                 sendResponse(false, null, 'Mizik sa a pa egziste nan baz done a.', 404);
             }
 
-            $coverUrl = $params['cover_url'] ?? $existing['cover_url'];
-            $audioUrl = $params['audio_url'] ?? $existing['audio_url'];
+            $audioCol = getMusiquesAudioColumn($db);
+            $coverUrl = $params['cover_url'] ?? $params['coverUrl'] ?? $existing['cover_url'] ?? ($existing['coverUrl'] ?? '');
+            $audioUrl = $params['audio_url'] ?? $params['audioUrl'] ?? $existing[$audioCol] ?? ($existing['audio_url'] ?? ($existing['audioUrl'] ?? ''));
 
             if (isset($_FILES['cover_file']) && $_FILES['cover_file']['error'] === UPLOAD_ERR_OK) {
                 $upCov = uploadServerFile($_FILES['cover_file'], 'covers');
                 if ($upCov['success']) $coverUrl = $upCov['url'];
             }
-            if (isset($_FILES['audio_file']) && $_FILES['audio_file']['error'] === UPLOAD_ERR_OK) {
-                $upAud = uploadServerFile($_FILES['audio_file'], 'musiques');
-                if ($upAud['success']) $audioUrl = $upAud['url'];
+
+            $audioFileParam = $_FILES['audio_file'] ?? $_FILES['audioFile'] ?? $_FILES['audio'] ?? null;
+            if ($audioFileParam && isset($audioFileParam['tmp_name']) && !empty($audioFileParam['tmp_name']) && $audioFileParam['error'] === UPLOAD_ERR_OK) {
+                $upAud = handleAudioUpload($audioFileParam);
+                if (!$upAud['success']) {
+                    sendResponse(false, null, 'Erè telechajman nouvo fichye odyo: ' . $upAud['message'], 400);
+                }
+                $audioUrl = $upAud['audioUrl'];
             }
 
             $fields = [
@@ -684,7 +856,7 @@ try {
                 'tiktok_url'    => $params['tiktok_url'] ?? $existing['tiktok_url'],
                 'instagram_url' => $params['instagram_url'] ?? $existing['instagram_url'],
                 'cover_url'     => $coverUrl,
-                'audio_url'     => $audioUrl
+                $audioCol       => $audioUrl
             ];
 
             $sqlParts = [];
@@ -701,8 +873,12 @@ try {
             $getUp = $db->prepare("SELECT * FROM musiques WHERE id = ?");
             $getUp->execute([$id]);
             $updatedM = $getUp->fetch();
+            if ($updatedM) {
+                $updatedM['audioUrl'] = $updatedM[$audioCol] ?? $audioUrl;
+                $updatedM['audio_url'] = $updatedM[$audioCol] ?? $audioUrl;
+            }
 
-            sendResponse(true, $updatedM, 'Mizik la mete ajou avèk siksè.');
+            sendResponse(true, $updatedM, 'Mizik la mete ajou avèk siksè nan baz done a.');
             break;
         }
 
@@ -921,18 +1097,53 @@ try {
         // =========================================================================
 
         /**
+         * [INSERT] Telechaje fichye odyo sèlman ak validasyon finfo_file (MP3/WAV)
+         * POST /api.php?action=upload_audio
+         */
+        case 'upload_audio': {
+            $audioFile = $_FILES['file'] ?? $_FILES['audio_file'] ?? $_FILES['audio'] ?? null;
+            if (!$audioFile) {
+                sendResponse(false, null, 'Okenn fichye odyo pa voye nan requèt la (chan "file" oswa "audio_file" manke).', 400);
+            }
+
+            $res = handleAudioUpload($audioFile);
+            if (!$res['success']) {
+                sendResponse(false, null, $res['message'], 400);
+            }
+
+            // Si yon musique_id te voye, mete ajou kolòn audioUrl la dirèkteman nan baz done a
+            $musiqueId = $params['musique_id'] ?? $params['id'] ?? '';
+            if (!empty($musiqueId)) {
+                $audioCol = getMusiquesAudioColumn($db);
+                $upDb = $db->prepare("UPDATE musiques SET `{$audioCol}` = ? WHERE id = ?");
+                $upDb->execute([$res['audioUrl'], $musiqueId]);
+            }
+
+            sendResponse(true, $res, 'Fichye odyo a valide (MIME: ' . $res['mimeType'] . ') epi estoke avèk siksè nan /var/www/html/upmizik/uploads/.', 200);
+            break;
+        }
+
+        /**
          * [INSERT] Telechaje nenpòt fichye (Odyo, Cover, Avatar, Prèv)
          * POST /api.php?action=upload_file
          */
         case 'upload_file': {
             $folder = $params['folder'] ?? 'musiques'; // musiques, covers, preuves, avatars, bannieres
-            if (!isset($_FILES['file'])) {
+            $fileToUpload = $_FILES['file'] ?? $_FILES['audio_file'] ?? $_FILES['cover_file'] ?? null;
+
+            if (!$fileToUpload) {
                 sendResponse(false, null, 'Okenn fichye pa voye nan requèt la (chan "file" manke).', 400);
             }
 
-            $res = uploadServerFile($_FILES['file'], $folder);
+            // Si se yon fichye odyo (musiques oswa audio), pase pa handleAudioUpload ak finfo_file
+            if ($folder === 'musiques' || $folder === 'audio') {
+                $res = handleAudioUpload($fileToUpload);
+            } else {
+                $res = uploadServerFile($fileToUpload, $folder);
+            }
+
             if ($res['success']) {
-                sendResponse(true, $res, 'Fichye a telechaje avèk siksè sou Hostinger.', 200);
+                sendResponse(true, $res, 'Fichye a telechaje avèk siksè sou sèvè a.', 200);
             } else {
                 sendResponse(false, null, $res['message'], 400);
             }

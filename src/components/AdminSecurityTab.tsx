@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { IntrusionLogItem } from '../types';
 import { StorageService } from '../utils/storage';
+import { FirebaseService } from '../utils/firebase';
 
 export const AdminSecurityTab: React.FC = () => {
   const [logs, setLogs] = useState<IntrusionLogItem[]>([]);
@@ -36,6 +37,11 @@ export const AdminSecurityTab: React.FC = () => {
   const [selectedLog, setSelectedLog] = useState<IntrusionLogItem | null>(null);
   const [isLockedOut, setIsLockedOut] = useState<boolean>(false);
   const [lockoutRemaining, setLockoutRemaining] = useState<number>(0);
+
+  // Platform Data Reset states
+  const [resetConfirmInput, setResetConfirmInput] = useState<string>('');
+  const [isResetting, setIsResetting] = useState<boolean>(false);
+  const [resetSuccessMessage, setResetSuccessMessage] = useState<string>('');
 
   const loadData = () => {
     const storedLogs = StorageService.getIntrusionLogs();
@@ -111,6 +117,38 @@ export const AdminSecurityTab: React.FC = () => {
     StorageService.clearAdminLockout();
     setIsLockedOut(false);
     setLockoutRemaining(0);
+  };
+
+  const handleExecuteFullDataReset = async () => {
+    if (resetConfirmInput.trim().toUpperCase() !== 'RESET') {
+      alert('Tanpri tape "RESET" pou konfime aksyon sa a.');
+      return;
+    }
+
+    if (!window.confirm('ÈSKE OU SÈTEN OU VLE RETIRE TOUT ATIS, MIZIK AK PÒS YO? Aksyon sa a ap netwaye tout done yo nèt sou aplikasyon an ak nan nwaj la pou pèmèt ou rekòmanse a zewo.')) {
+      return;
+    }
+
+    setIsResetting(true);
+    try {
+      // 1. Reset localStorage content
+      StorageService.resetContentData();
+      
+      // 2. Clear cloud Firestore collections
+      await FirebaseService.clearAllCollections();
+
+      setResetSuccessMessage('Tout atis, tout moso mizik, ak tout pòs yo te retire avèk siksè! Kounye a ou ka kòmanse poste nouvo kontni san pwoblèm.');
+      setResetConfirmInput('');
+      
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (e) {
+      console.error(e);
+      alert('Gen yon ti erè ki pase pandan n ap netwaye done yo. Tanpri re-eseye.');
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   const unreviewedCount = logs.filter((l) => l.status === 'alert').length;
@@ -452,6 +490,75 @@ export const AdminSecurityTab: React.FC = () => {
                 )}
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* PLATFORM COMPLETE DATA PURGE / RESET SECTION */}
+      <div className="rounded-3xl p-6 sm:p-8 bg-gradient-to-b from-red-950/20 to-[#070b16] border border-red-500/30 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                Reyinisyalizasyon Done Platfòm nan (Reset Kontni)
+              </h3>
+              <p className="text-xs text-slate-400">
+                Retire tout ansyen atis, tout moso mizik, ak tout pòs sosyal yo pou kòmanse ak yon baz done nèf.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {resetSuccessMessage ? (
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs sm:text-sm font-medium flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 shrink-0" />
+            <span>{resetSuccessMessage}</span>
+          </div>
+        ) : (
+          <div className="p-4 sm:p-5 rounded-2xl bg-[#05070f] border border-red-500/20 space-y-4">
+            <div className="space-y-2 text-xs text-slate-300">
+              <p className="text-amber-300 font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400" />
+                Atansyon: Aksyon sa a se yon netwayaj konplè (Destriktif)
+              </p>
+              <ul className="list-disc pl-5 space-y-1 text-slate-400">
+                <li>Tout atis ki te anrejistre yo ap efase nèt.</li>
+                <li>Tout moso mizik ki te monte yo ap retire sou sit la.</li>
+                <li>Tout pòs ak kòmantè nan espas kominotè a ap efase.</li>
+                <li>Paramèt sekirite w ak kòd admin ou ap rete entak.</li>
+              </ul>
+            </div>
+
+            <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <input
+                type="text"
+                placeholder='Tape "RESET" pou konfime'
+                value={resetConfirmInput}
+                onChange={(e) => setResetConfirmInput(e.target.value)}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-black/60 border border-red-500/40 text-white text-xs font-mono placeholder:text-slate-500 focus:outline-none focus:border-red-400"
+              />
+              <button
+                type="button"
+                onClick={handleExecuteFullDataReset}
+                disabled={isResetting || resetConfirmInput.trim().toUpperCase() !== 'RESET'}
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold shadow-lg shadow-red-950/40 flex items-center justify-center gap-2 transition-all"
+              >
+                {isResetting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>N ap netwaye done yo...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Netwaye Tout Done Yo Nèt</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         )}
       </div>

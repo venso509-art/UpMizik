@@ -298,6 +298,8 @@ export type ActivityEventType =
   | 'echec_connexion_suspendu'
   | 'connexion_reussie'
   | 'echec_serveur'
+  | 'action_securite'
+  | 'suppression_post'
   | 'autre';
 
 export interface ActivityLogItem {
