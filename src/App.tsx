@@ -14,7 +14,7 @@ import {
   ThemeMode
 } from './types';
 import { StorageService } from './utils/storage';
-import { FirebaseService } from './utils/firebase';
+import { HostingerService } from './utils/hostingerService';
 import { INITIAL_ARTISTS } from './data/initialData';
 import { globalSoundEngine } from './utils/audioEngine';
 
@@ -41,7 +41,7 @@ import { AdminDashboard, DEFAULT_HTG_EXCHANGE_RATE } from './components/AdminDas
 import { GlobalAudioPlayer } from './components/GlobalAudioPlayer';
 import { Footer } from './components/Footer';
 import { ToastNotification, ToastMessage } from './components/ToastNotification';
-import { updateDocumentMetaTags, updateArtistDocumentMetaTags } from './utils/deepLink';
+import { updateDocumentMetaTags, updateArtistDocumentMetaTags, clearDeepLinkUrlParams } from './utils/deepLink';
 import { offlineManager } from './utils/offlineManager';
 import { OfflinePlaylistModal } from './components/OfflinePlaylistModal';
 import { ArtistStoryBar } from './components/ArtistStoryBar';
@@ -161,6 +161,7 @@ export default function App() {
   });
 
   // Modal States
+  const deepLinkProcessedRef = useRef(false);
   const [musicToSupport, setMusicToSupport] = useState<MusicItem | null>(null);
   const [musicForComment, setMusicForComment] = useState<MusicItem | null>(null);
   const [musicToShare, setMusicToShare] = useState<MusicItem | null>(null);
@@ -256,9 +257,9 @@ export default function App() {
     (async () => {
       try {
         const [cloudMusic, cloudArtists, cloudPosts] = await Promise.all([
-          FirebaseService.fetchMusic(),
-          FirebaseService.fetchArtists(),
-          FirebaseService.fetchSocialPosts()
+          HostingerService.fetchMusic(),
+          HostingerService.fetchArtists(),
+          HostingerService.fetchSocialPosts()
         ]);
 
         if (cloudMusic && cloudMusic.length > 0) {
@@ -266,47 +267,75 @@ export default function App() {
           StorageService.saveMusic(cloudMusic);
         } else if (localMusic.length > 0) {
           // Seed cloud database on first run
-          FirebaseService.syncMusic(localMusic);
+          HostingerService.syncMusic(localMusic);
         }
 
         if (cloudArtists && cloudArtists.length > 0) {
-          // Merge cloud artists with local artists so newly registered local/pending artists are not lost
+          // Merge cloud artists with local artists, preserving validated/rejected/active local state
           const currentLocal = StorageService.getArtists();
-          const cloudMap = new Map(cloudArtists.map(a => [a.id, a]));
-          const merged = [...cloudArtists];
+          const localMap = new Map(currentLocal.map(a => [a.id, a]));
+          const merged: ArtistUser[] = [];
+          const processedIds = new Set<string>();
+
+          for (const ca of cloudArtists) {
+            const la = localMap.get(ca.id);
+            if (la) {
+              if (la.status && la.status !== 'pending' && ca.status === 'pending') {
+                merged.push({ ...ca, ...la, status: la.status });
+              } else {
+                merged.push({ ...ca, ...la });
+              }
+            } else {
+              merged.push(ca);
+            }
+            processedIds.add(ca.id);
+          }
           for (const la of currentLocal) {
-            if (!cloudMap.has(la.id)) {
+            if (!processedIds.has(la.id)) {
               merged.push(la);
-              cloudMap.set(la.id, la);
             }
           }
           setArtists(merged);
           StorageService.saveArtists(merged);
         } else if (localArtists.length > 0) {
-          FirebaseService.syncArtists(localArtists);
+          HostingerService.syncArtists(localArtists);
         }
 
         if (cloudPosts && cloudPosts.length > 0) {
           setSocialPosts(cloudPosts);
           StorageService.saveSocialPosts(cloudPosts);
         } else if (localSocial.length > 0) {
-          FirebaseService.syncSocialPosts(localSocial);
+          HostingerService.syncSocialPosts(localSocial);
         }
       } catch {
-        // Firebase sync deferred silently in local / sandboxed mode
+        // Hostinger VPS background sync deferred silently in local / sandboxed mode
       }
     })();
 
     // Real-time Firestore Subscriptions with onSnapshot across the app
-    const unsubArtists = FirebaseService.subscribeToArtists((cloudArtists) => {
+    const unsubArtists = HostingerService.subscribeToArtists((cloudArtists) => {
       if (cloudArtists && cloudArtists.length > 0) {
         const currentLocal = StorageService.getArtists();
-        const cloudMap = new Map(cloudArtists.map(a => [a.id, a]));
-        const merged = [...cloudArtists];
+        const localMap = new Map(currentLocal.map(a => [a.id, a]));
+        const merged: ArtistUser[] = [];
+        const processedIds = new Set<string>();
+
+        for (const ca of cloudArtists) {
+          const la = localMap.get(ca.id);
+          if (la) {
+            if (la.status && la.status !== 'pending' && ca.status === 'pending') {
+              merged.push({ ...ca, ...la, status: la.status });
+            } else {
+              merged.push({ ...ca, ...la });
+            }
+          } else {
+            merged.push(ca);
+          }
+          processedIds.add(ca.id);
+        }
         for (const la of currentLocal) {
-          if (!cloudMap.has(la.id)) {
+          if (!processedIds.has(la.id)) {
             merged.push(la);
-            cloudMap.set(la.id, la);
           }
         }
         setArtists(merged);
@@ -314,17 +343,31 @@ export default function App() {
       }
     });
 
-    const unsubDonations = FirebaseService.subscribeToDonations((cloudDonations) => {
+    const unsubDonations = HostingerService.subscribeToDonations((cloudDonations) => {
       if (cloudDonations && cloudDonations.length > 0) {
         const activeAdmin = StorageService.getLoggedInAdmin();
         if (activeAdmin && activeAdmin.role === 'super_admin') {
           const currentLocal = StorageService.getDonations(activeAdmin);
-          const cloudMap = new Map(cloudDonations.map(d => [d.id, d]));
-          const merged = [...cloudDonations];
+          const localMap = new Map(currentLocal.map(d => [d.id, d]));
+          const merged: DonationItem[] = [];
+          const processedIds = new Set<string>();
+
+          for (const cd of cloudDonations) {
+            const ld = localMap.get(cd.id);
+            if (ld) {
+              if (ld.status && ld.status !== 'pending' && cd.status === 'pending') {
+                merged.push({ ...cd, ...ld, status: ld.status });
+              } else {
+                merged.push({ ...cd, ...ld });
+              }
+            } else {
+              merged.push(cd);
+            }
+            processedIds.add(cd.id);
+          }
           for (const ld of currentLocal) {
-            if (!cloudMap.has(ld.id)) {
+            if (!processedIds.has(ld.id)) {
               merged.push(ld);
-              cloudMap.set(ld.id, ld);
             }
           }
           setDonations(merged);
@@ -333,7 +376,7 @@ export default function App() {
       }
     });
 
-    const unsubMusic = FirebaseService.subscribeToMusic((cloudMusic) => {
+    const unsubMusic = HostingerService.subscribeToMusic((cloudMusic) => {
       if (cloudMusic && cloudMusic.length > 0) {
         const currentLocal = StorageService.getMusic();
         const cloudMap = new Map(cloudMusic.map(m => [m.id, m]));
@@ -349,7 +392,7 @@ export default function App() {
       }
     });
 
-    const unsubPosts = FirebaseService.subscribeToSocialPosts((cloudPosts) => {
+    const unsubPosts = HostingerService.subscribeToSocialPosts((cloudPosts) => {
       if (cloudPosts && cloudPosts.length > 0) {
         setSocialPosts(cloudPosts);
         StorageService.saveSocialPosts(cloudPosts);
@@ -411,7 +454,8 @@ export default function App() {
     };
   }, [currentTrack, currentArtist, currentAdmin]);
 
-  // Ensure Admin Dashboard always has fresh data when accessed
+  // Pwoteksyon Espas Admin (admin_dashboard route guard):
+  // Asire ke si yon admin pa konekte ak wòl 'super_admin', li otomatikman redirije sou 'public' san okenn done finansye pa chaje nan memwa.
   useEffect(() => {
     if (currentView === 'admin_dashboard') {
       const activeAdmin = currentAdmin || StorageService.getLoggedInAdmin();
@@ -421,9 +465,16 @@ export default function App() {
         }
         setDonations(StorageService.getDonations(activeAdmin));
         setArchives(StorageService.getArchives(activeAdmin));
+        setArtists(StorageService.getArtists());
+        setMusicList(StorageService.getMusic());
+      } else {
+        // Pa gen wòl 'super_admin': vide tout done finansye nan memwa imedyatman epi redirije sou 'public'
+        setDonations([]);
+        setArchives([]);
+        setCurrentAdmin(null);
+        setCurrentView('public');
+        addToast('error', 'Aksè refize: Ou dwe konekte kòm Administratè prensipal (Super Admin) pou w ka wè espas sa a.');
       }
-      setArtists(StorageService.getArtists());
-      setMusicList(StorageService.getMusic());
     }
   }, [currentView, currentAdmin]);
 
@@ -451,7 +502,11 @@ export default function App() {
       }
     }
   }, [currentView, currentArtist, artists]);
+  // Deep-Link & URL Routing Manager
+  // Lè yon moun ouvri yon lyen dirèk (?artist=, ?track=, ?post=, #...), li dirije moun nan imedyatman,
+  // epi li netwaye URL la (retounen sou baz upmizik.com) pou moun nan ka navige lib e libè san lyen an pa bloke l.
   useEffect(() => {
+    if (deepLinkProcessedRef.current) return;
     if (musicList.length === 0) return;
 
     try {
@@ -462,47 +517,58 @@ export default function App() {
       const hash = window.location.hash;
       const cleanHash = hash ? hash.replace(/^#(track-|music-|post-|artist-)?/, '') : null;
 
-      // Handle direct artist profile deep-link (?artist=id or #artist-id)
-      const targetArtistId = artistQuery || (cleanHash && cleanHash.startsWith('artist-') ? cleanHash.replace('artist-', '') : null);
-      if (targetArtistId) {
-        handleOpenArtistProfile(targetArtistId);
-      }
+      const hasDeepLink = Boolean(trackQuery || artistQuery || postQuery || (cleanHash && !cleanHash.includes('section')));
 
-      // Handle direct post deep-link
-      const targetPostId = postQuery || (cleanHash && cleanHash.startsWith('sp-') ? cleanHash : null);
-      if (targetPostId) {
-        setTimeout(() => {
-          const postEl = document.getElementById(`post-${targetPostId}`);
-          if (postEl) {
-            postEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            postEl.classList.add('ring-4', 'ring-blue-500', 'shadow-2xl', 'transition-all');
-            setTimeout(() => {
-              postEl.classList.remove('ring-4', 'ring-blue-500', 'shadow-2xl');
-            }, 4000);
-          }
-        }, 800);
-      }
+      if (hasDeepLink) {
+        deepLinkProcessedRef.current = true;
 
-      const targetId = trackQuery || (cleanHash && !cleanHash.includes('section') && !cleanHash.startsWith('sp-') ? cleanHash : null);
+        // Handle direct artist profile deep-link (?artist=id or #artist-id)
+        const targetArtistId = artistQuery || (cleanHash && cleanHash.startsWith('artist-') ? cleanHash.replace('artist-', '') : null);
+        if (targetArtistId) {
+          handleOpenArtistProfile(targetArtistId);
+        }
 
-      if (targetId) {
-        const found = musicList.find((m) => m.id === targetId || m.id === `music-${targetId}`);
-        if (found) {
-          updateDocumentMetaTags(found);
-          addToast('info', `🔗 Moso louvri pa lyen dirèk: "${found.title}" pa ${found.artistName}`);
-
-          // Highlight and scroll to music card after render
+        // Handle direct post deep-link (?post=id or #sp-id)
+        const targetPostId = postQuery || (cleanHash && cleanHash.startsWith('sp-') ? cleanHash : null);
+        if (targetPostId) {
+          setCurrentView('social');
           setTimeout(() => {
-            const cardEl = document.getElementById(`music-card-${found.id}`);
-            if (cardEl) {
-              cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              cardEl.classList.add('ring-4', 'ring-yellow-400', 'shadow-2xl', 'transition-all');
+            const postEl = document.getElementById(`post-${targetPostId}`);
+            if (postEl) {
+              postEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              postEl.classList.add('ring-4', 'ring-blue-500', 'shadow-2xl', 'transition-all');
               setTimeout(() => {
-                cardEl.classList.remove('ring-4', 'ring-yellow-400', 'shadow-2xl');
+                postEl.classList.remove('ring-4', 'ring-blue-500', 'shadow-2xl');
               }, 4000);
             }
-          }, 600);
+          }, 800);
         }
+
+        // Handle direct track deep-link (?track=id or #track-id)
+        const targetId = trackQuery || (cleanHash && !cleanHash.includes('section') && !cleanHash.startsWith('sp-') && !cleanHash.startsWith('artist-') ? cleanHash : null);
+
+        if (targetId) {
+          const found = musicList.find((m) => m.id === targetId || m.id === `music-${targetId}`);
+          if (found) {
+            updateDocumentMetaTags(found);
+            addToast('info', `🔗 Moso louvri pa lyen dirèk: "${found.title}" pa ${found.artistName}`);
+
+            // Highlight and scroll to music card after render
+            setTimeout(() => {
+              const cardEl = document.getElementById(`music-card-${found.id}`);
+              if (cardEl) {
+                cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                cardEl.classList.add('ring-4', 'ring-yellow-400', 'shadow-2xl', 'transition-all');
+                setTimeout(() => {
+                  cardEl.classList.remove('ring-4', 'ring-yellow-400', 'shadow-2xl');
+                }, 4000);
+              }
+            }, 600);
+          }
+        }
+
+        // Otomatikman netwaye query params yo pou adrès la retounen sou baz upmizik.com
+        clearDeepLinkUrlParams();
       }
     } catch {
       // Ignore deep link parse errors
@@ -756,7 +822,7 @@ export default function App() {
 
   const handleArtistRegister = (newArtist: ArtistUser) => {
     StorageService.saveArtist(newArtist);
-    FirebaseService.saveSingleArtist(newArtist);
+    HostingerService.saveSingleArtist(newArtist);
     setArtists(StorageService.getArtists());
     addToast('success', `Kont ou kreye avèk siksè! Prèv $4.99 la voye bay Admin.`);
   };
@@ -803,7 +869,7 @@ export default function App() {
       sharesCount: 0
     };
     StorageService.saveMusic(newSong);
-    FirebaseService.saveSingleMusic(newSong);
+    HostingerService.saveSingleMusic(newSong);
     const updatedList = StorageService.getMusic();
     setMusicList(updatedList);
     setArtists(StorageService.getArtists());
@@ -822,7 +888,7 @@ export default function App() {
     setMusicList(StorageService.getMusic());
     const targetSong = musicList.find(m => m.id === musicId);
     if (targetSong) {
-      FirebaseService.saveSingleMusic(targetSong);
+      HostingerService.saveSingleMusic(targetSong);
     }
     addToast('success', `🔗 Lyen "${targetSong?.title || 'mizik la'}" kopye! Mèsi pou pataj la (${updatedCount} pataj).`);
   };
@@ -830,7 +896,7 @@ export default function App() {
   // Admin & Artist Actions
   const handleSaveMusicItem = (song: MusicItem) => {
     StorageService.saveMusic(song);
-    FirebaseService.saveSingleMusic(song);
+    HostingerService.saveSingleMusic(song);
     const updatedList = StorageService.getMusic();
     setMusicList(updatedList);
     setArtists(StorageService.getArtists());
@@ -854,7 +920,7 @@ export default function App() {
       setCurrentTrack(null);
     }
     StorageService.deleteMusic(musicId);
-    FirebaseService.deleteMusic(musicId);
+    HostingerService.deleteMusic(musicId);
     setMusicList(StorageService.getMusic());
     setArtists(StorageService.getArtists());
     setRecRefreshKey(prev => prev + 1);
@@ -864,7 +930,7 @@ export default function App() {
   const handleDeleteSocialPost = (postId: string) => {
     const actorName = currentAdmin?.name || currentArtist?.stageName || 'Administratè';
     StorageService.deleteSocialPost(postId, actorName);
-    FirebaseService.deleteSinglePost(postId).catch(() => {});
+    HostingerService.deleteSinglePost(postId).catch(() => {});
     setSocialPosts(prev => prev.filter(p => p.id !== postId));
     addToast('success', 'Pòs atis la siprime avèk siksè!');
   };
@@ -879,10 +945,10 @@ export default function App() {
     const adminName = currentAdmin?.name || 'Mr Clauvens';
     const result = StorageService.validateDonation(donationId, accept, adminName);
     if (result.donation) {
-      FirebaseService.saveSingleDonation(result.donation);
+      HostingerService.saveSingleDonation(result.donation);
     }
     if (result.generatedEmail) {
-      FirebaseService.saveInboxMessage(result.generatedEmail);
+      HostingerService.saveInboxMessage(result.generatedEmail);
     }
     setDonations(StorageService.getDonations(currentAdmin));
     setMusicList(StorageService.getMusic());
@@ -902,10 +968,10 @@ export default function App() {
     const adminName = currentAdmin?.name || 'Mr Clauvens';
     const result = StorageService.validateArtist(artistId, accept, adminName, reason);
     if (result.artist) {
-      FirebaseService.saveSingleArtist(result.artist);
+      HostingerService.saveSingleArtist(result.artist);
     }
     if (result.generatedEmail) {
-      FirebaseService.saveInboxMessage(result.generatedEmail);
+      HostingerService.saveInboxMessage(result.generatedEmail);
     }
 
     const newStatus = accept ? ('active' as const) : ('rejected' as const);
@@ -964,14 +1030,31 @@ export default function App() {
     }
   };
 
+  const handlePurgeAllPendingValidations = async () => {
+    const purgedArtists = StorageService.purgeAllPendingArtists();
+    const purgedDonations = StorageService.purgeAllPendingDonations();
+    try {
+      await Promise.all([
+        HostingerService.purgePendingArtists(),
+        HostingerService.purgePendingDonations()
+      ]);
+    } catch {}
+    setArtists(StorageService.getArtists());
+    setDonations(StorageService.getDonations(currentAdmin));
+    addToast(
+      'success',
+      `Tout demand ki te an atant yo vide nèt! (${purgedArtists} atis, ${purgedDonations} don retire)`
+    );
+  };
+
   const handleSuspendArtist = (artistId: string, days: number, reason?: string) => {
     const adminName = currentAdmin?.name || 'Mr Clauvens';
     const result = StorageService.suspendArtist(artistId, days, reason, adminName);
     if (result.artist) {
-      FirebaseService.saveSingleArtist(result.artist);
+      HostingerService.saveSingleArtist(result.artist);
     }
     if (result.generatedEmail) {
-      FirebaseService.saveInboxMessage(result.generatedEmail);
+      HostingerService.saveInboxMessage(result.generatedEmail);
     }
     const updatedArtists = StorageService.getArtists();
     setArtists(updatedArtists);
@@ -996,10 +1079,10 @@ export default function App() {
     const adminName = currentAdmin?.name || 'Mr Clauvens';
     const result = StorageService.reactivateArtist(artistId, adminName);
     if (result.artist) {
-      FirebaseService.saveSingleArtist(result.artist);
+      HostingerService.saveSingleArtist(result.artist);
     }
     if (result.generatedEmail) {
-      FirebaseService.saveInboxMessage(result.generatedEmail);
+      HostingerService.saveInboxMessage(result.generatedEmail);
     }
     const updatedArtists = StorageService.getArtists();
     setArtists(updatedArtists);
@@ -1023,7 +1106,7 @@ export default function App() {
   const handleDeleteArtist = (artistId: string, deleteSongs?: boolean) => {
     const target = artists.find((a) => a.id === artistId);
     StorageService.deleteArtist(artistId, deleteSongs);
-    FirebaseService.deleteArtist(artistId);
+    HostingerService.deleteArtist(artistId);
     setArtists(StorageService.getArtists());
     if (deleteSongs) {
       setMusicList(StorageService.getMusic());
@@ -1055,10 +1138,10 @@ export default function App() {
       adminName
     });
     if (res.artist) {
-      FirebaseService.saveSingleArtist(res.artist);
+      HostingerService.saveSingleArtist(res.artist);
     }
     if (res.generatedEmail) {
-      FirebaseService.saveInboxMessage(res.generatedEmail);
+      HostingerService.saveInboxMessage(res.generatedEmail);
     }
     const updatedArtists = StorageService.getArtists();
     setArtists(updatedArtists);
@@ -1104,7 +1187,7 @@ export default function App() {
   // Support Submission
   const handleConfirmSupport = (newDonation: DonationItem) => {
     const saved = StorageService.addDonation(newDonation);
-    FirebaseService.saveSingleDonation(saved);
+    HostingerService.saveSingleDonation(saved);
     const activeAdmin = currentAdmin || StorageService.getLoggedInAdmin();
     if (activeAdmin && activeAdmin.role === 'super_admin') {
       setDonations(StorageService.getDonations(activeAdmin));
@@ -1355,7 +1438,7 @@ export default function App() {
         )}
 
         {/* ADMIN DASHBOARD VIEW */}
-        {currentView === 'admin_dashboard' && currentAdmin && (
+        {currentView === 'admin_dashboard' && currentAdmin && currentAdmin.role === 'super_admin' && (
           <AdminDashboard
             currentAdmin={currentAdmin}
             musicList={musicList}
@@ -1369,6 +1452,7 @@ export default function App() {
             onSaveTop3Override={handleSaveTop3Override}
             onValidateDonation={handleValidateDonation}
             onValidateArtist={handleValidateArtist}
+            onPurgePendingValidations={handlePurgeAllPendingValidations}
             onSuspendArtist={handleSuspendArtist}
             onReactivateArtist={handleReactivateArtist}
             onDeleteArtist={handleDeleteArtist}
@@ -1433,7 +1517,10 @@ export default function App() {
         music={musicForComment}
         currentAdmin={currentAdmin}
         isAdmin={Boolean(currentAdmin)}
-        onClose={() => setMusicForComment(null)}
+        onClose={() => {
+          setMusicForComment(null);
+          clearDeepLinkUrlParams();
+        }}
         onUpdateCommentCount={(musicId, count) => {
           setMusicList((prev) =>
             prev.map((m) => (m.id === musicId ? { ...m, commentsCount: count } : m))
@@ -1457,7 +1544,10 @@ export default function App() {
         }
         currentPlayingId={currentTrack?.id || null}
         isPlaying={isPlaying}
-        onClose={() => setSelectedArtistForProfile(null)}
+        onClose={() => {
+          setSelectedArtistForProfile(null);
+          clearDeepLinkUrlParams();
+        }}
         onPlayToggle={handlePlayToggle}
         onOpenSupport={(m) => setMusicToSupport(m)}
         onOpenArtistProfile={handleOpenArtistProfile}
@@ -1466,7 +1556,10 @@ export default function App() {
       {/* MODAL 1: DONATION / SUPPORT MODAL */}
       <SupportModal
         music={musicToSupport}
-        onClose={() => setMusicToSupport(null)}
+        onClose={() => {
+          setMusicToSupport(null);
+          clearDeepLinkUrlParams();
+        }}
         onConfirmSupport={handleConfirmSupport}
         onSubmitDonation={(data) => {
           const newDonation: DonationItem = {
@@ -1492,7 +1585,10 @@ export default function App() {
       {/* MODAL 4: ARTIST SIGNUP / LOGIN MODAL */}
       {showArtistAuth && (
         <ArtistAuthModal
-          onClose={() => setShowArtistAuth(false)}
+          onClose={() => {
+            setShowArtistAuth(false);
+            clearDeepLinkUrlParams();
+          }}
           onLoginSuccess={handleArtistLoginSuccess}
           onRegisterArtist={handleArtistRegister}
           existingArtists={artists}
@@ -1502,7 +1598,10 @@ export default function App() {
       {/* MODAL 5: ADMIN AUTH MODAL */}
       {showAdminAuth && (
         <AdminAuthModal
-          onClose={() => setShowAdminAuth(false)}
+          onClose={() => {
+            setShowAdminAuth(false);
+            clearDeepLinkUrlParams();
+          }}
           onLoginSuccess={handleAdminLoginSuccess}
         />
       )}
@@ -1511,7 +1610,10 @@ export default function App() {
       {musicToShare && (
         <ShareModal
           music={musicToShare}
-          onClose={() => setMusicToShare(null)}
+          onClose={() => {
+            setMusicToShare(null);
+            clearDeepLinkUrlParams();
+          }}
           onShareCompleted={handleShareCompleted}
         />
       )}

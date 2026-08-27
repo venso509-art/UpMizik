@@ -104,9 +104,10 @@ import { compressAndReadFile } from '../utils/imageUtils';
 import { IdbStorage } from '../utils/idbStorage';
 import { getAudioDuration } from '../utils/audioEngine';
 import { StorageService } from '../utils/storage';
-import { FirebaseService } from '../utils/firebase';
+import { HostingerService } from '../utils/hostingerService';
 import { SongCreditsEditor } from './SongCreditsEditor';
 import { SongCreditsModal } from './SongCreditsModal';
+import { ArtistRejectionModal } from './ArtistRejectionModal';
 import { BulkArtistActionBar, BulkArtistSuspendModal, BulkArtistRejectModal } from './BulkArtistModals';
 import { MonthlyRevenueBarChart } from './MonthlyRevenueBarChart';
 import { PalmaresTrophiesDashboard } from './PalmaresTrophiesDashboard';
@@ -182,6 +183,7 @@ interface AdminDashboardProps {
   onSaveTop3Override: (override: { enabled: boolean; topIds: string[] }) => void;
   onValidateDonation: (donationId: string, accept: boolean) => void;
   onValidateArtist: (artistId: string, accept: boolean, reason?: string) => void;
+  onPurgePendingValidations?: () => void;
   onSuspendArtist?: (artistId: string, days: number, reason?: string) => void;
   onReactivateArtist?: (artistId: string) => void;
   onDeleteArtist?: (artistId: string, deleteSongs?: boolean) => void;
@@ -220,6 +222,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onSaveTop3Override,
   onValidateDonation,
   onValidateArtist,
+  onPurgePendingValidations,
   onSuspendArtist,
   onReactivateArtist,
   onDeleteArtist,
@@ -383,12 +386,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [bulkRejectReason, setBulkRejectReason] = useState<string>('Foto prÃ¨v transfÃ¨ a pa klÃ¨ oswa nimewo referans lan pa kowenside.');
 
   // Instant optimistic handlers
-  const handleOptimisticValidateArtist = (artistId: string, accept: boolean, reason?: string) => {
+  const handleValidateArtist = (artistId: string, accept: boolean, reason?: string) => {
     const targetStatus = accept ? 'active' : 'rejected';
     setOptimisticArtistStatus(prev => ({ ...prev, [artistId]: targetStatus }));
     onValidateArtist(artistId, accept, reason);
     setInternalRefreshKey(k => k + 1);
   };
+  const handleOptimisticValidateArtist = handleValidateArtist;
 
   // Bulk Handlers for Artists
   const handleToggleSelectArtist = (artistId: string) => {
@@ -752,7 +756,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
 
     // 1. Subscribe to 'artists' collection onSnapshot
-    const unsubscribeArtists = FirebaseService.subscribeToArtists((cloudArtists) => {
+    const unsubscribeArtists = HostingerService.subscribeToArtists((cloudArtists) => {
       if (!currentAdmin || !currentAdmin.email) {
         clearAllLiveNotifications();
         return;
@@ -802,7 +806,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
 
     // 2. Subscribe to 'donations' collection onSnapshot
-    const unsubscribeDonations = FirebaseService.subscribeToDonations((cloudDonations) => {
+    const unsubscribeDonations = HostingerService.subscribeToDonations((cloudDonations) => {
       if (!currentAdmin || !currentAdmin.email) {
         clearAllLiveNotifications();
         return;
@@ -1419,7 +1423,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       'Pati UpMizik 15% (HTG)'
     ];
 
-    const rows = musicList.map((m, idx) => {
+    const sortedForCsv = [...musicList].sort((a, b) => {
+      const posA = typeof a.position === 'number' ? a.position : 0;
+      const posB = typeof b.position === 'number' ? b.position : 0;
+      if (posA !== posB) return posB - posA;
+      return (b.createdAt || '').localeCompare(a.createdAt || '');
+    });
+    const rows = sortedForCsv.map((m, idx) => {
       const gross = m.totalDonations || 0;
       const artistShareUsd = gross * 0.85;
       const platformShareUsd = gross * 0.15;
@@ -2687,18 +2697,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         const pendingMusicCount = musicList.filter(m => m.status === 'pending').length;
         const rejectedMusicCount = musicList.filter(m => m.status === 'rejected').length;
 
-        const filteredMusicList = musicList.filter(m => {
-          const status = m.status || 'active';
-          if (musicStatusFilter !== 'all' && status !== musicStatusFilter) return false;
-          if (musicSearchQuery.trim()) {
-            const q = musicSearchQuery.toLowerCase().trim();
-            const matchesTitle = m.title.toLowerCase().includes(q);
-            const matchesArtist = m.artistName.toLowerCase().includes(q);
-            const matchesCategory = m.category.toLowerCase().includes(q);
-            return matchesTitle || matchesArtist || matchesCategory;
-          }
-          return true;
-        });
+        const filteredMusicList = musicList
+          .filter(m => {
+            const status = m.status || 'active';
+            if (musicStatusFilter !== 'all' && status !== musicStatusFilter) return false;
+            if (musicSearchQuery.trim()) {
+              const q = musicSearchQuery.toLowerCase().trim();
+              const matchesTitle = m.title.toLowerCase().includes(q);
+              const matchesArtist = m.artistName.toLowerCase().includes(q);
+              const matchesCategory = m.category.toLowerCase().includes(q);
+              return matchesTitle || matchesArtist || matchesCategory;
+            }
+            return true;
+          })
+          .sort((a, b) => {
+            // LÃ²d envÃ¨se: Nouvote / pi gwo nimewo pozisyon parÃ¨t anlÃ¨ nÃ¨t (ex: 9, 8, 7, 6, 5, 4, 3, 2, 1)
+            const posA = typeof a.position === 'number' ? a.position : 0;
+            const posB = typeof b.position === 'number' ? b.position : 0;
+            if (posA !== posB) return posB - posA;
+            return (b.createdAt || '').localeCompare(a.createdAt || '');
+          });
 
         return (
           <div className="bg-[#0a0f1d]/90 border border-white/[0.08] rounded-3xl overflow-hidden shadow-xl space-y-5 p-6 backdrop-blur-xl animate-fadeIn">
@@ -3264,9 +3282,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
 
                 <div className="flex items-center flex-wrap gap-2 text-xs">
+                  {totalPendingAll > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm('Ãˆske w sÃ¨ten ou vle vide tout demand atis ak don ki an atant yo nÃ¨t? Sa ap retire yo nan baz done a pou yo pa monte ankÃ².')) {
+                          if (onPurgePendingValidations) {
+                            onPurgePendingValidations();
+                          } else {
+                            StorageService.purgeAllPendingArtists();
+                            StorageService.purgeAllPendingDonations();
+                            HostingerService.purgePendingArtists();
+                            HostingerService.purgePendingDonations();
+                            setOptimisticArtistStatus({});
+                            setOptimisticDonationStatus({});
+                            setInternalRefreshKey(k => k + 1);
+                          }
+                        }
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/40 hover:border-red-400 flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                      title="Vide tout demand ki an atant yo nÃ¨t"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                      <span>Vide Tout Demand ki an Atant ({totalPendingAll})</span>
+                    </button>
+                  )}
                   <div className="inline-flex items-center gap-1.5 text-yellow-400 bg-yellow-500/10 px-3 py-1.5 rounded-xl border border-yellow-500/20 font-medium">
                     <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
-                    <span>Sinkronizasyon Firestore an tan reyÃ¨l ak notifikasyon otomatik</span>
+                    <span>Sinkronizasyon Hostinger MySQL an tan reyÃ¨l ak notifikasyon otomatik</span>
                   </div>
                 </div>
               </div>
@@ -3604,19 +3647,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const reason = window.prompt(
-                                    `Rezon refi pou ${art.stageName} (Foto pa klÃ¨, referans kÃ²rÃ¨k, elatriye):`,
-                                    'Foto prÃ¨v transfÃ¨ a pa klÃ¨ oswa referans lan pa koresponn. Tanpri telechaje yon nouvo prÃ¨v.'
-                                  );
-                                  if (reason !== null) {
-                                    handleOptimisticValidateArtist(art.id, false, reason);
-                                  }
+                                  setArtistRejectTarget(art);
+                                  setArtistRejectReason('Foto prÃ¨v transfÃ¨ a pa klÃ¨ oswa nimewo referans lan pa kowenside.');
                                 }}
                                 className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white flex items-center gap-1 shadow-lg shadow-red-950/40 transition-all active:scale-95"
-                                title="Refize demand enskripsyon sa a epi deplase l nan Espas Refize"
+                                title="Refize demand enskripsyon sa a ak yon rezon epi voye imÃ¨l notifikasyon bay atis la"
                               >
                                 <X className="w-3.5 h-3.5" />
-                                <span>Refize</span>
+                                <span>Refize ak Rezon</span>
                               </button>
                             </div>
                           </div>
@@ -4262,18 +4300,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                 {/* Header Action Buttons */}
                 <div className="flex items-center flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const restored = StorageService.restoreSamplePendingArtists();
-                      window.dispatchEvent(new CustomEvent('upmizik_artist_updated', { detail: { action: 'restore_pending' } }));
-                    }}
-                    className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 shadow flex items-center gap-2 transition-all active:scale-95"
-                    title="Chaje oswa retabli demand egzanp yo (King Rabo, Mimi Vwa Dous, Ti-KreyÃ²l)"
-                  >
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    <span>Chaje / Retabli Demand</span>
-                  </button>
+                  {pendingList.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm('Ãˆske w sÃ¨ten ou vle vide tout demand atis ki an atant yo nÃ¨t? Sa ap retire yo nan baz done a pou yo pa monte ankÃ².')) {
+                          if (onPurgePendingValidations) {
+                            onPurgePendingValidations();
+                          } else {
+                            StorageService.purgeAllPendingArtists();
+                            HostingerService.purgePendingArtists();
+                            setOptimisticArtistStatus({});
+                            setInternalRefreshKey(k => k + 1);
+                          }
+                        }
+                      }}
+                      className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/40 hover:border-red-400 shadow flex items-center gap-2 transition-all active:scale-95"
+                      title="Vide tout demand atis ki an atant yo nÃ¨t"
+                    >
+                      <Trash2 className="w-4 h-4 text-red-400" />
+                      <span>Vide Demand Atis ({pendingList.length})</span>
+                    </button>
+                  )}
 
                   <button
                     type="button"
@@ -4885,9 +4933,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 setArtistRejectReason('Foto prÃ¨v transfÃ¨ a pa klÃ¨ oswa nimewo referans lan pa kowenside.');
                               }}
                               className="px-3.5 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white flex items-center gap-1.5 shadow-lg shadow-red-950/40 transition-all active:scale-95"
+                              title="Refize demand atis sa a ak yon rezon epi voye imÃ¨l notifikasyon bay atis la"
                             >
                               <X className="w-3.5 h-3.5" />
-                              <span>Refize</span>
+                              <span>Refize ak Rezon</span>
                             </button>
                           )}
 
@@ -5741,10 +5790,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   setArtistRejectReason('Foto prÃ¨v transfÃ¨ a pa klÃ¨ oswa nimewo referans lan pa kowenside.');
                                 }}
                                 className="px-3 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white flex items-center gap-1.5 transition-all active:scale-95"
-                                title="Refize demand atis sa a"
+                                title="Refize demand atis sa a ak yon rezon epi voye imÃ¨l notifikasyon bay atis la"
                               >
                                 <X className="w-3.5 h-3.5" />
-                                <span>Refize</span>
+                                <span>Refize ak Rezon</span>
                               </button>
                             </div>
                           )}
@@ -8098,93 +8147,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
+      {/* BULK ARTIST REJECT MODAL */}
+      <BulkArtistRejectModal
+        isOpen={showBulkRejectModal}
+        selectedArtists={effectiveArtists.filter((a) => selectedArtistIds.includes(a.id))}
+        onClose={() => setShowBulkRejectModal(false)}
+        onConfirm={(reason) => handleBulkRejectSelectedArtists(reason)}
+      />
+
+      {/* BULK ARTIST SUSPEND MODAL */}
+      <BulkArtistSuspendModal
+        isOpen={showBulkSuspendModal}
+        selectedArtists={effectiveArtists.filter((a) => selectedArtistIds.includes(a.id))}
+        onClose={() => setShowBulkSuspendModal(false)}
+        onConfirm={(days, reason) => {
+          selectedArtistIds.forEach((id) => {
+            if (onSuspendArtist) {
+              onSuspendArtist(id, days, reason);
+            } else {
+              StorageService.suspendArtist(id, days, reason, currentAdmin?.name || "Mr Clauvens");
+            }
+          });
+          setShowBulkSuspendModal(false);
+          setSelectedArtistIds([]);
+          setInternalRefreshKey((k) => k + 1);
+        }}
+      />
+
       {/* ARTIST REJECTION REASON MODAL */}
       {artistRejectTarget && (
-        <div
-          className="fixed inset-0 z-50 overflow-y-auto modal-backdrop-scroll bg-black/85 backdrop-blur-xl animate-fadeIn p-2 sm:p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setArtistRejectTarget(null);
+        <ArtistRejectionModal
+          artist={artistRejectTarget}
+          onClose={() => setArtistRejectTarget(null)}
+          onConfirmReject={(artistId, reason) => {
+            handleOptimisticValidateArtist(artistId, false, reason);
+            setArtistRejectTarget(null);
           }}
-        >
-          <div className="min-h-full flex items-center justify-center py-4">
-            <div
-              className="relative max-w-md w-full bg-[#0a0f1d]/95 border border-red-500/30 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 backdrop-blur-2xl my-auto max-h-[92dvh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-            <div className="w-12 h-12 rounded-2xl bg-red-600/20 text-red-400 border border-red-500/30 flex items-center justify-center mx-auto shadow-lg shadow-red-500/10">
-              <X className="w-6 h-6" />
-            </div>
-
-            <div className="text-center">
-              <h3 className="text-lg font-bold text-white">Refize Enskripsyon Atis la</h3>
-              <p className="text-xs text-slate-300 mt-1">
-                Atis: <strong className="text-yellow-300">{artistRejectTarget.stageName}</strong> ({artistRejectTarget.email})
-              </p>
-              <p className="text-[11px] text-slate-400 mt-1">
-                Yon imÃ¨l notifikasyon ap voye otomatikman sou imÃ¨l atis la ak rezon an pou mande l re-telechaje yon prÃ¨v valab.
-              </p>
-            </div>
-
-            {/* Quick reason presets */}
-            <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-slate-300">Chwazi oswa modifye rezon an:</label>
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                <button
-                  type="button"
-                  onClick={() => setArtistRejectReason('Foto prÃ¨v transfÃ¨ a pa klÃ¨ oswa nimewo referans lan pa kowenside.')}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 border border-white/[0.08]"
-                >
-                  Foto pa klÃ¨
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setArtistRejectReason('Montan 723.55 Goud ($4.99 USD) la pa koresponn ak transfÃ¨ ki fÃ¨t la.')}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 border border-white/[0.08]"
-                >
-                  Montan pa kÃ²rÃ¨k
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setArtistRejectReason('Nimewo tranzaksyon MonCash/NatCash la pa egziste nan sistÃ¨m nou.')}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 border border-white/[0.08]"
-                >
-                  Referans pa valid
-                </button>
-              </div>
-
-              <textarea
-                rows={3}
-                value={artistRejectReason || ''}
-                onChange={(e) => setArtistRejectReason(e.target.value)}
-                className="w-full bg-[#05070a] border border-white/[0.12] rounded-xl p-3 text-xs text-white outline-none focus:border-red-500 leading-relaxed resize-none"
-                placeholder="Mete rezon rejÃ¨ a pou atis la..."
-              />
-            </div>
-
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setArtistRejectTarget(null)}
-                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] border border-white/[0.08]"
-              >
-                Anile
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (artistRejectTarget) {
-                    handleOptimisticValidateArtist(artistRejectTarget.id, false, artistRejectReason.trim() || undefined);
-                    setArtistRejectTarget(null);
-                  }
-                }}
-                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-950/50"
-              >
-                Konfime & Voye ImÃ¨l
-              </button>
-            </div>
-            </div>
-          </div>
-        </div>
+          defaultReason={artistRejectReason}
+        />
       )}
 
       {/* Admin Split Sheet / Credits Inspector Modal (With Percentages) */}
@@ -9525,9 +9525,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       setArtistRejectTarget(target);
                       setArtistRejectReason('Foto prÃ¨v transfÃ¨ a pa klÃ¨ oswa nimewo referans lan pa kowenside.');
                     }}
-                    className="px-4 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white transition-all shadow-md shadow-red-950/40"
+                    className="px-4 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white transition-all shadow-md shadow-red-950/40 flex items-center gap-1.5"
+                    title="Refize demand atis sa a epi voye rezon an sou WhatsApp oswa ImÃ¨l"
                   >
-                    Refize Demand
+                    <X className="w-4 h-4" />
+                    <span>Refize Demand</span>
                   </button>
                 )}
 
@@ -9670,10 +9672,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="block text-xs font-bold text-slate-300 mb-1">Vil Rezidans</label>
                   <input
                     type="text"
-                    value={manualArtistCity ?? ''}
-                    onChange={(e) => setManualAxœì™QSÛ8€ßù;´s„MHz-%tRJgZJ'Cïxa˜©bË‰YòH2‰aø-»'ûò‡î'ÜÚ	™ ÚÜMó`Ç²´’v?­Vke˜6;Ì¤%Z6Dµ©)ŸĞÕó%°übN|Ú‘< ª¾¼ÛŞ„=;”é”Š5h¾+*ô| İhpÁËåò²U’Ï‰ÖŸHDëË='L8‡VÛ9zâÕ¼ß=r-©°ÑÍéu˜¡î‘W^¯C(ıDoŞ¨…×ªç’‰hàô9Ä}g£\ƒ8u*x3´oœ¾ŞsI Ã™ ‚Ú†çnOn¹;Ù^š.Ï‹§ElqÒ¢||š-.ıîÕhB)ŒÓBMK4'†:8¨å¬/oï¾Ğ|ÿ	>Ó.SÙ˜KUØé°puËÍ%[ûd"NŒUİ&qYWvsD¤ÿ‘Š¶éÔÏÛMŸcQ?‹ˆHo¨Œ›&ğú5¬¬Ø[H±Ó!¢JtêÛ ©Ù¿ÙüÔ­W6ªˆUnÓH
-9`ÖÂ‰Ò3÷|6Ä$ñàÔ7RÁ3wRwv2çärWc¿ŞRä  ND!Y÷ãİ´ »8¾äÚ©@]GeÙÊq+1FŠ[@V°#€Øqæw‘:tC½•Vb*&Ú+È]üìËÈàc$L+k–QDhf˜AöY…gËmrDP¯×ájTÍ pµ!Ğ×xéeÍƒ)|u‡²W,o3—w½@&Œ>µPí¢Î¿ØÔh³-À?ß¾ıC„RS&`:s0, :•bÕÆ„;´ùÏâ…ø†ĞÃe4¨´Ğˆ*Â§VÈËxÅ$æo8Ìğ ğ–©ÁE×dşç^”ÜÓ½¾H›ê¯z‹[[mNz¹ªÅË=RÜğN	Í‡ÒŸAê?²]¢C¾Ò¹¢‡Dqû
-²„‚û<ÑÁPÂ„1±Şt]–›°œ¯u§ìËÈıÙáè¬`4·b¹vÇá6C¬ ñ}›úr®&÷Y¡o	³ğadª"?åK¡d}B®,—=ë×å#ïøUA;B)«µZ(ùRvëyE“aK"<lhİÁ%Á;KYƒ7ºxåµÕ¢n¡€9ì¤°ÀóYÛBz;Gë^Ü¿á2•Å<€4ÑÍ@3ó³ğ´Z~ùò§º“¦’2œë¬‘	øåL.¿œÉã;“!r‹ìK¬…–`h'á&Á ~ƒ7LB@aü?Íì³SÖÍ'ƒ‡YÆ'ŸbñaR=Ë<0c’O}e€Ç­äôt‹bØS4|/ğÃâÆsÜ!g)ß£}.~Hï±ë„
-ŸÎEÓµ”"õF&İ,:Øíê˜ªLÈTcÿÄ’µğGdÙÙi*³	Ú‰u‹SlEXİ•©C¦™¼%™;¦aû»€4…ë¥b§3œ"FƒİT*AãŸPağ–g‡ˆÕ]-,`Sxı@Ş°T¶	YR1GYc¢(±èUÉ®ŸUl¦´p”…†ß› =T>$º«XœÁ‘Ó%*\ éBLºøLP:pR¯?*9ÎÆÌ(£NÄ~zÆ'D5ä´Ø]¤×N"‹·6lñVauVút:yú¹#{ 7,î„—BÂµİ¢cÏÆŒq".µÔöµ-¼çSiÈ<¡js¼ÒúñDºuz:¶­»!ğ`Ù 
-óŒ3T©“VÄ¬nù¾ZÀeĞÍÔ€<`h_ÇHGA¨dä¤”sÙ~ #2kWZ¯r­««Š–Ï
-Ãœ°ÃÛ—ÿ®DºÏÂÙ×÷­0Ç®ò íoít(ÎòÆ­BGX±EµôòÕ®¸r[nşúÎÖ´„[n(U4^6QéÆ#Ò¾t£‚ç¯–ş  ÿÿ …N§
+                    value={manualArtistCixœì—QoÚHÇßó)Fœt!RzM
+ôhÔê¢´=¤VÕIU<†-ë]kwøÒ>õËô¹áî‹İâ”%IAÇå¤ğ€a¼;ãùÏog½6ƒgÏ`w÷ó8>J™`ë¢Š{ĞjƒAûšÉ”‰¶ÜØn³*Ö,Ó´µ1)î¹=%‚õq¨DˆºUy18†îß_şúfU¢QšGğûˆ%çÄ¾`Æ¼a1¶*/J…€ŞÀûğSĞ~	Ø9ô”&—ó‹7r‹ş‡ ¶ß8‡HõSs<¿Ãâ}×ƒ ´Jeˆ¡7L½ÃZ’Ì; ‹Å©õ¦¦¸Î<J­à=©$ºÏo/›~ÈÇíeûÌ¼ì¢)XE9ÍPıÑâi"%­×#á
+‹Ì¢wHyÄ=o¿Ò>Ëe¡{úªu8òh¯éÏ\:ƒq™¤Ö©³ÍŠÇp×!fÓW(vØº¨»K<+ë".ñÑår¼húštíÖï!O³bÆJªÿY/Œe–Ã©ä&câ&¨
+ì»©r0ñ–Ü¦f†E‚2är°&…£ï f®üÂ'Øe}ËÇ¸»œ{İ]\b“Ü*±\É¹´•y®•vGBÇ2i¡Ú-LÔŠ¡wòSèDnF–GàÃ{&xˆPí$‰VcoôÖôşsh_e(á¥²
+:cF\lÒS-Ü-Äum“^WxX³İ­MÌ±ï×jµ{Øõî¯›aÓÕ´—~ÏŞL¾Rq¡Z;:Úh7ı‚ºZ©h£Í2wğÀÏ¼4ÛåçTÒf9Ğ,†ß˜ş;¯`j®o@ÎÂÉôü*UL¯	æ›5°yÇGïÔhÛÌPTKQ7 ¦ğğ@Ë–i™pkQûl˜"ğFÄ.ñl¸9rS´!CÏy¦¨ÓGÎèéWÔÌ'3Ì‘•VÓº8p•ÎÁÎs®Vss54ù.Ä\ãå*ÃœlÅ;Í–È¹ĞhøŸ«Z"h5*å„"S H±ñú(ó¥û15t¬Ë<:Â€%Ş!$Ö«_¦g—òœWXôRk•t¨Yt•â¶Kmª´àıú²Îo‡jÒ	Ãr¹_«‰jÄ„q×¹”!)¼X™%áo\y‘†t”ÕÇ¥Z*ıUêÏÁj&ÏO»^_	¥İÇÕv;’t¬ùB—×Ó¤½˜;ûôu)ß*­Q8­ŒU†H«xNpƒÄ![†B¨Éì_¡LiHI¿ÅÀÜV’ø¨€²îˆÁå¯E ÿ (+Ë„ãtä’õLc†ğ3É«ñ#q¢:ÄË…v4İ¦)—mßºöwNãÂ¶÷tçóÓ   ÿÿ €FL¾

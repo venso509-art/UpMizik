@@ -387,3 +387,20 @@ export const drawStoryPreviewCanvas = (
     };
   });
 };
+
+/**
+ * Netwaye paramèt rechèch (query params tankou ?track=..., ?artist=..., ?post=...)
+ * ak hash (#...) nan adrès navigatè a san rechaje paj la.
+ * Sa pèmèt itilizatè a retounen dirèkteman sou baz sit la (upmizik.com)
+ * pou l ka navige lib e libè san lyen an pa bloke l oswa fòse l retounen sou menm paj la.
+ */
+export const clearDeepLinkUrlParams = (): void => {
+  try {
+    if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
+      const cleanPath = window.location.pathname || '/';
+      window.history.replaceState({}, document.title, cleanPath);
+    }
+  } catch {
+    // Ignore any history manipulation errors in restricted environments
+  }
+};

@@ -33,7 +33,7 @@ import { ArtistBadge } from './ArtistBadge';
 import { getArtistBadgeInfo, calculateArtistTotalDonations } from '../utils/badgeSystem';
 import { SocialCommentModal } from './SocialCommentModal';
 import { SocialPostShareModal } from './SocialPostShareModal';
-import { FirebaseService } from '../utils/firebase';
+import { HostingerService } from '../utils/hostingerService';
 
 interface UpMizikSocialProps {
   posts: SocialPost[];
@@ -1067,7 +1067,7 @@ export const UpMizikSocial: React.FC<UpMizikSocialProps> = ({
                   try {
                     const actor = isAdmin ? 'Administratè' : (currentArtist?.stageName || 'Atis');
                     StorageService.deleteSocialPost(postToDelete.id, actor);
-                    await FirebaseService.deleteSinglePost(postToDelete.id).catch(() => {});
+                    await HostingerService.deleteSinglePost(postToDelete.id).catch(() => {});
                     if (onDeletePost) {
                       onDeletePost(postToDelete.id);
                     }

@@ -83,7 +83,7 @@ export const Footer: React.FC<FooterProps> = ({
               </li>
               <li>
                 <button onClick={onOpenArtistAuth} className="hover:text-yellow-400 transition-colors">
-                  Espas Atis (Enskripsyon / Koneksyon)
+                  Espas Atis (Koneksyon)
                 </button>
               </li>
             </ul>

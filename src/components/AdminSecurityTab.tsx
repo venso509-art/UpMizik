@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { IntrusionLogItem } from '../types';
 import { StorageService } from '../utils/storage';
-import { FirebaseService } from '../utils/firebase';
+import { HostingerService } from '../utils/hostingerService';
 
 export const AdminSecurityTab: React.FC = () => {
   const [logs, setLogs] = useState<IntrusionLogItem[]>([]);
@@ -135,7 +135,7 @@ export const AdminSecurityTab: React.FC = () => {
       StorageService.resetContentData();
       
       // 2. Clear cloud Firestore collections
-      await FirebaseService.clearAllCollections();
+      await HostingerService.clearAllCollections();
 
       setResetSuccessMessage('Tout atis, tout moso mizik, ak tout pòs yo te retire avèk siksè! Kounye a ou ka kòmanse poste nouvo kontni san pwoblèm.');
       setResetConfirmInput('');
@@ -536,7 +536,7 @@ export const AdminSecurityTab: React.FC = () => {
               <input
                 type="text"
                 placeholder='Tape "RESET" pou konfime'
-                value={resetConfirmInput}
+                value={resetConfirmInput ?? ''}
                 onChange={(e) => setResetConfirmInput(e.target.value)}
                 className="flex-1 px-4 py-2.5 rounded-xl bg-black/60 border border-red-500/40 text-white text-xs font-mono placeholder:text-slate-500 focus:outline-none focus:border-red-400"
               />

@@ -99,11 +99,11 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
               <Flame className="w-4 h-4 text-yellow-300 fill-yellow-300" />
               <span>Koute Top 3 a Kounya</span>
             </a>
-
             <button
               id="hero-join-artist-btn"
               onClick={onOpenArtistAuth}
-              className="px-6 py-3.5 rounded-xl font-bold text-sm bg-[#0d1424]/90 hover:bg-[#141e36] text-slate-200 hover:text-white border border-white/[0.12] flex items-center gap-2 transition-all active:scale-95 shadow-lg backdrop-blur-md"
+              style={{ display: 'none' }}
+              className="hidden px-6 py-3.5 rounded-xl font-bold text-sm bg-[#0d1424]/90 hover:bg-[#141e36] text-slate-200 hover:text-white border border-white/[0.12] items-center gap-2 transition-all active:scale-95 shadow-lg backdrop-blur-md"
             >
               <Sparkles className="w-4 h-4 text-yellow-400" />
               <span>Ou se yon Atis? Enskri Isit</span>

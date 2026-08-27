@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { SocialPost, MusicItem, ArtistUser, AdminUser } from '../types';
 import { StorageService } from '../utils/storage';
-import { FirebaseService } from '../utils/firebase';
+import { HostingerService } from '../utils/hostingerService';
 
 interface AdminSocialModerationTabProps {
   currentAdmin: AdminUser;
@@ -73,7 +73,7 @@ export const AdminSocialModerationTab: React.FC<AdminSocialModerationTabProps> =
     try {
       const adminName = currentAdmin?.name || 'Mr Clauvens (Admin)';
       StorageService.deleteSocialPost(postToDelete.id, adminName);
-      await FirebaseService.deleteSinglePost(postToDelete.id).catch(() => {});
+      await HostingerService.deleteSinglePost(postToDelete.id).catch(() => {});
       setLocalPosts((prev) => prev.filter((p) => p.id !== postToDelete.id));
       if (onPostDeleted) {
         onPostDeleted(postToDelete.id);
@@ -171,7 +171,7 @@ export const AdminSocialModerationTab: React.FC<AdminSocialModerationTabProps> =
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <select
               id="admin-social-artist-select"
-              value={selectedArtistId}
+              value={selectedArtistId ?? 'all'}
               onChange={(e) => setSelectedArtistId(e.target.value)}
               className="bg-[#05070a] border border-white/10 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:border-blue-500 focus:outline-none"
             >
@@ -188,7 +188,7 @@ export const AdminSocialModerationTab: React.FC<AdminSocialModerationTabProps> =
               <input
                 id="admin-social-search-input"
                 type="text"
-                value={searchQuery}
+                value={searchQuery ?? ''}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Chèche #hashtag, tèks, atis..."
                 className="w-full bg-[#05070a] border border-white/10 rounded-xl pl-9 pr-7 py-1.5 text-xs text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"

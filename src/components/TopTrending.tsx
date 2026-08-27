@@ -110,13 +110,10 @@ export const TopTrending: React.FC<TopTrendingProps> = ({
         </div>
 
         {/* Top 3 Horizontal 3-Column Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {slots.map((idx) => {
-            const rank = getRankBadge(idx);
-            const music = topMusic[idx];
-
-            // 1. POPULATED MUSIC SLOT
-            if (music) {
+        {topMusic.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {topMusic.slice(0, 3).map((music, idx) => {
+              const rank = getRankBadge(idx);
               const isThisPlaying = currentPlayingId === music.id && isPlaying;
               return (
                 <div
@@ -242,63 +239,13 @@ export const TopTrending: React.FC<TopTrendingProps> = ({
 
                 </div>
               );
-            }
-
-            // 2. DESIGNED READY PLACEHOLDER SLOT (WHEN NO MUSIC HAS OCCUPIED THIS RANK YET)
-            return (
-              <div
-                key={`empty-top-slot-${idx}`}
-                id={`top-trending-empty-slot-${idx + 1}`}
-                className={`relative rounded-3xl overflow-hidden border border-dashed ${rank.emptyBorderClass} p-5 flex flex-col justify-between transition-all duration-300 hover:border-solid hover:shadow-xl backdrop-blur-xl group`}
-              >
-                {/* Header Rank Badge */}
-                <div className="flex items-center justify-between gap-2 mb-4">
-                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs uppercase tracking-wider ${rank.badgeClass}`}>
-                    {rank.icon}
-                    <span>{rank.label}</span>
-                  </span>
-                  <span className="text-[11px] font-semibold text-yellow-400/90 bg-yellow-500/10 px-2.5 py-0.5 rounded-lg border border-yellow-500/20">
-                    Plas Disponib
-                  </span>
-                </div>
-
-                {/* Empty Artwork & Slot Details */}
-                <div className="flex items-center gap-4 my-3">
-                  <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden shrink-0 border border-dashed border-white/20 bg-black/40 flex items-center justify-center group-hover:border-yellow-400/40 transition-colors">
-                    {rank.emptyIcon}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-base sm:text-lg font-bold text-white leading-tight">
-                      Plas #{idx + 1} Disponib
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                      Mete yon nouvo mizik sou platfòm lan pou l monte nan plas sa a otomatikman!
-                    </p>
-                  </div>
-                </div>
-
-                {/* Card Action Footer */}
-                <div className="mt-4 pt-4 border-t border-white/[0.08] flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      if (onOpenArtistAuth) {
-                        onOpenArtistAuth();
-                      } else {
-                        window.location.href = '/pibliye.php';
-                      }
-                    }}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold bg-white/[0.08] hover:bg-yellow-400 hover:text-slate-950 text-slate-200 border border-white/[0.1] hover:border-yellow-400 transition-all active:scale-95"
-                  >
-                    <PlusCircle className="w-4 h-4" />
-                    <span>Pibliye Mizik Isit</span>
-                    <ArrowUpRight className="w-3.5 h-3.5 opacity-60" />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+            })}
+          </div>
+        ) : (
+          <div className="p-8 rounded-3xl bg-[#0a0f1d]/60 border border-white/[0.06] text-center text-slate-400 text-sm">
+            Klasman Top 3 a ap kalkile sou ekout ak sipò fanatik yo...
+          </div>
+        )}
 
       </div>
     </section>

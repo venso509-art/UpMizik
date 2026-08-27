@@ -285,23 +285,27 @@ export function initializeStorage() {
 }
 
 export const StorageService = {
-  // HELPER: Find the lowest available positive integer position (1, 2, 3...)
+  // HELPER: Find the next sequential position integer (e.g. 1, 2, ... N + 1)
   getNextAvailablePosition: (list?: MusicItem[], excludePositions: number[] = []): number => {
     const musicList = list || StorageService.getMusic();
     const occupied = new Set<number>();
+    let maxPos = 0;
     for (const m of musicList) {
       if (typeof m.position === 'number' && m.position > 0) {
-        occupied.add(Math.floor(m.position));
+        const p = Math.floor(m.position);
+        occupied.add(p);
+        if (p > maxPos) maxPos = p;
       }
     }
     for (const p of excludePositions) {
       occupied.add(p);
+      if (p > maxPos) maxPos = p;
     }
-    let candidate = 1;
+    let candidate = maxPos + 1;
     while (occupied.has(candidate)) {
       candidate++;
     }
-    return candidate;
+    return candidate > 0 ? candidate : 1;
   },
 
   // HELPER: Ensure every song in the list has a unique positive integer position without any collisions
@@ -920,6 +924,20 @@ export const StorageService = {
     return { artist: validatedArtist, generatedEmail };
   },
 
+  purgeAllPendingArtists: (): number => {
+    const list = StorageService.getArtists();
+    const pendingCount = list.filter(a => a.status === 'pending' || (a as any).statut === 'en_attente').length;
+    const filtered = list.filter(a => a.status !== 'pending' && (a as any).statut !== 'en_attente');
+    setStoredData(KEYS.ARTISTS, filtered);
+    try {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('upmizik_artist_updated', { detail: { action: 'purge_pending', count: pendingCount } }));
+        window.dispatchEvent(new CustomEvent('upmizik_donation_updated', { detail: { action: 'purge_pending_artist' } }));
+      }
+    } catch {}
+    return pendingCount;
+  },
+
   restoreSamplePendingArtists: (): ArtistUser[] => {
     const list = StorageService.getArtists();
     const samplePending: ArtistUser[] = [
@@ -1347,6 +1365,19 @@ export const StorageService = {
     } catch {}
 
     return { donation: validatedDonation, generatedEmail };
+  },
+
+  purgeAllPendingDonations: (): number => {
+    const donations = StorageService.getRawStoredDonations();
+    const pendingCount = donations.filter(d => d.status === 'pending').length;
+    const filtered = donations.filter(d => d.status !== 'pending');
+    StorageService.saveDonations(filtered);
+    try {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('upmizik_donation_updated', { detail: { action: 'purge_pending', count: pendingCount } }));
+      }
+    } catch {}
+    return pendingCount;
   },
 
   // COMMENTS

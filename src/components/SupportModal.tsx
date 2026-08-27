@@ -27,7 +27,7 @@ import { MusicItem, DonationItem, PaymentSettingsConfig } from '../types';
 import { FloatingHearts, createHeartBurst, FloatingHeartParticle } from './FloatingHearts';
 import { compressAndReadFile } from '../utils/imageUtils';
 import { StorageService } from '../utils/storage';
-import { FirebaseService } from '../utils/firebase';
+import { HostingerService } from '../utils/hostingerService';
 
 export interface SupportModalProps {
   music: MusicItem | null;
@@ -391,7 +391,7 @@ export const SupportModal: React.FC<SupportModalProps> = ({
 
       // Save immediately to local storage & Firestore
       StorageService.addDonation(newDonationItem);
-      FirebaseService.saveSingleDonation(newDonationItem);
+      HostingerService.saveSingleDonation(newDonationItem);
 
       if (typeof onConfirmSupport === 'function') {
         onConfirmSupport(newDonationItem);

@@ -266,28 +266,22 @@ export const ArtistLeaderboard: React.FC<ArtistLeaderboardProps> = ({
             </div>
           </div>
         ) : (
-          <div className="order-2 md:order-1 relative bg-gradient-to-b from-slate-900/40 via-[#0a0f1d]/70 to-[#05070a] border border-dashed border-slate-500/30 rounded-3xl p-5 sm:p-6 flex flex-col justify-between backdrop-blur-xl group">
-            <div className="absolute -top-3.5 left-6 px-3 py-1 rounded-full bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 shadow-lg border border-slate-600">
+          <div className="order-2 md:order-1 relative bg-gradient-to-b from-slate-900/30 via-[#0a0f1d]/70 to-[#05070a] border border-slate-700/30 rounded-3xl p-5 sm:p-6 flex flex-col justify-between backdrop-blur-xl">
+            <div className="absolute -top-3.5 left-6 px-3 py-1 rounded-full bg-slate-800 text-slate-300 font-bold text-xs flex items-center gap-1.5 shadow-lg border border-slate-700">
               <Medal className="w-3.5 h-3.5 text-slate-400" />
               <span>#2 Top Atis</span>
             </div>
             <div>
               <div className="flex items-center gap-4 mt-3 mb-4">
-                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border border-dashed border-slate-600 flex items-center justify-center bg-black/40 text-slate-400 shrink-0">
-                  <Medal className="w-8 h-8 opacity-60" />
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border border-slate-800 flex items-center justify-center bg-black/40 text-slate-500 shrink-0">
+                  <Medal className="w-8 h-8 opacity-40" />
                 </div>
                 <div>
-                  <h3 className="text-base sm:text-lg font-bold text-white">Plas #2 Disponib</h3>
-                  <p className="text-xs text-slate-400 mt-1">Rezève pou 2èm atis ki monte nan klasman an</p>
+                  <h3 className="text-base sm:text-lg font-bold text-slate-300">Pozisyon #2</h3>
+                  <p className="text-xs text-slate-500 mt-1">Klasman ap kalkile selon ekout fanatik yo</p>
                 </div>
               </div>
             </div>
-            <button
-              onClick={() => (onOpenArtistAuth ? onOpenArtistAuth() : (window.location.href = '/pibliye.php'))}
-              className="w-full py-2.5 px-3 rounded-xl text-xs font-bold bg-white/[0.06] hover:bg-slate-300 hover:text-slate-950 text-slate-300 border border-white/[0.08] transition-all text-center"
-            >
-              Enskri kòm Atis
-            </button>
           </div>
         )}
 
@@ -371,26 +365,20 @@ export const ArtistLeaderboard: React.FC<ArtistLeaderboardProps> = ({
             </div>
           </div>
         ) : (
-          <div className="order-1 md:order-2 relative bg-gradient-to-b from-amber-950/30 via-[#0a0f1d] to-[#05070a] border-2 border-dashed border-yellow-400/40 rounded-3xl p-6 sm:p-7 flex flex-col justify-between backdrop-blur-2xl group transform md:-translate-y-2">
-            <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full bg-yellow-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-xl border-2 border-white uppercase tracking-wider">
-              <Crown className="w-4 h-4 fill-slate-950" />
+          <div className="order-1 md:order-2 relative bg-gradient-to-b from-amber-950/20 via-[#0a0f1d] to-[#05070a] border border-yellow-500/20 rounded-3xl p-6 sm:p-7 flex flex-col justify-between backdrop-blur-2xl transform md:-translate-y-2">
+            <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full bg-yellow-500/20 text-yellow-400 font-black text-xs flex items-center gap-2 shadow-xl border border-yellow-500/30 uppercase tracking-wider">
+              <Crown className="w-4 h-4" />
               <span>#1 Chanpyon Leaderboard</span>
             </div>
             <div>
               <div className="flex flex-col items-center text-center mt-3 mb-4">
-                <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl border-2 border-dashed border-yellow-400/50 flex items-center justify-center bg-black/50 text-yellow-400 mb-3">
-                  <Crown className="w-12 h-12 animate-pulse" />
+                <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl border border-yellow-500/20 flex items-center justify-center bg-black/50 text-yellow-500/40 mb-3">
+                  <Crown className="w-12 h-12 opacity-40" />
                 </div>
-                <h3 className="text-xl font-black text-white">Plas #1 Disponib</h3>
-                <p className="text-xs text-slate-300 mt-1">Rezève pou premye atis ki mennen klasman an!</p>
+                <h3 className="text-xl font-black text-slate-200">Pozisyon #1</h3>
+                <p className="text-xs text-slate-400 mt-1">Klasman ap kalkile selon ekout fanatik yo</p>
               </div>
             </div>
-            <button
-              onClick={() => (onOpenArtistAuth ? onOpenArtistAuth() : (window.location.href = '/pibliye.php'))}
-              className="w-full py-3 px-3.5 rounded-2xl text-xs font-black bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-500 hover:from-yellow-300 hover:to-amber-400 text-slate-950 shadow-xl shadow-yellow-500/30 transition-all text-center"
-            >
-              Enskri kòm Atis Pou Pran Plas la
-            </button>
           </div>
         )}
 
@@ -475,28 +463,22 @@ export const ArtistLeaderboard: React.FC<ArtistLeaderboardProps> = ({
             </div>
           </div>
         ) : (
-          <div className="order-3 md:order-3 relative bg-gradient-to-b from-amber-950/20 via-[#0a0f1d]/70 to-[#05070a] border border-dashed border-amber-600/30 rounded-3xl p-5 sm:p-6 flex flex-col justify-between backdrop-blur-xl group">
-            <div className="absolute -top-3.5 left-6 px-3 py-1 rounded-full bg-amber-900 text-amber-200 font-bold text-xs flex items-center gap-1.5 shadow-lg border border-amber-700">
+          <div className="order-3 md:order-3 relative bg-gradient-to-b from-amber-950/10 via-[#0a0f1d]/70 to-[#05070a] border border-amber-800/30 rounded-3xl p-5 sm:p-6 flex flex-col justify-between backdrop-blur-xl">
+            <div className="absolute -top-3.5 left-6 px-3 py-1 rounded-full bg-amber-900/60 text-amber-300 font-bold text-xs flex items-center gap-1.5 shadow-lg border border-amber-800">
               <Medal className="w-3.5 h-3.5 text-amber-400" />
               <span>#3 Top Atis</span>
             </div>
             <div>
               <div className="flex items-center gap-4 mt-3 mb-4">
-                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border border-dashed border-amber-700 flex items-center justify-center bg-black/40 text-amber-400 shrink-0">
-                  <Medal className="w-8 h-8 opacity-60" />
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border border-amber-900/40 flex items-center justify-center bg-black/40 text-amber-600/40 shrink-0">
+                  <Medal className="w-8 h-8 opacity-40" />
                 </div>
                 <div>
-                  <h3 className="text-base sm:text-lg font-bold text-white">Plas #3 Disponib</h3>
-                  <p className="text-xs text-slate-400 mt-1">Rezève pou 3èm atis ki monte nan klasman an</p>
+                  <h3 className="text-base sm:text-lg font-bold text-slate-300">Pozisyon #3</h3>
+                  <p className="text-xs text-slate-500 mt-1">Klasman ap kalkile selon ekout fanatik yo</p>
                 </div>
               </div>
             </div>
-            <button
-              onClick={() => (onOpenArtistAuth ? onOpenArtistAuth() : (window.location.href = '/pibliye.php'))}
-              className="w-full py-2.5 px-3 rounded-xl text-xs font-bold bg-white/[0.06] hover:bg-amber-500 hover:text-slate-950 text-slate-300 border border-white/[0.08] transition-all text-center"
-            >
-              Enskri kòm Atis
-            </button>
           </div>
         )}
       </div>

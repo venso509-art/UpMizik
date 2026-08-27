@@ -269,7 +269,7 @@ export const BulkArtistSuspendModal: React.FC<BulkArtistSuspendModalProps> = ({
                 min="1"
                 max="365"
                 placeholder="Oswa antre lòt kantite jou (egz: 120)..."
-                value={customSuspensionDays}
+                value={customSuspensionDays ?? ''}
                 onChange={(e) => setCustomSuspensionDays(e.target.value)}
                 className="w-full bg-[#05070a] border border-white/[0.1] focus:border-amber-400 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-600 outline-none"
               />
@@ -290,7 +290,7 @@ export const BulkArtistSuspendModal: React.FC<BulkArtistSuspendModalProps> = ({
             </label>
             <textarea
               rows={2}
-              value={suspensionReason}
+              value={suspensionReason ?? ''}
               onChange={(e) => setSuspensionReason(e.target.value)}
               placeholder="Eksplike rezon sispansyon an..."
               className="w-full bg-[#05070a] border border-white/[0.1] focus:border-amber-400 rounded-xl p-3 text-xs text-white outline-none resize-none"
@@ -420,7 +420,7 @@ export const BulkArtistRejectModal: React.FC<BulkArtistRejectModalProps> = ({
             </label>
             <textarea
               rows={3}
-              value={rejectReason}
+              value={rejectReason ?? ''}
               onChange={(e) => setRejectReason(e.target.value)}
               placeholder="Antre rezon an..."
               className="w-full bg-[#05070a] border border-white/[0.1] focus:border-red-500 rounded-xl p-3 text-xs text-white outline-none resize-none"
